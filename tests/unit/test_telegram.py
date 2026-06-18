@@ -1,0 +1,94 @@
+"""Unit tests for the TelegramChannel (parse + verify + send/fetch with fake httpx)."""
+
+import pytest
+
+from cogno_gateway import (
+    ChannelConfig,
+    MessageKind,
+    OutboundMessage,
+    Reaction,
+    TelegramChannel,
+)
+from tests.conftest import FakeResponse, body_of
+
+CFG = ChannelConfig(token="BOT123", secret="sek")
+
+
+def _ch():
+    return TelegramChannel(CFG)
+
+
+def test_requires_token():
+    from cogno_gateway import GatewayError
+    with pytest.raises(GatewayError):
+        TelegramChannel(ChannelConfig())
+
+
+def test_parse_text_with_reply():
+    msg = _ch().parse_inbound({"message": {
+        "chat": {"id": 42}, "message_id": 7, "text": "oi",
+        "reply_to_message": {"text": "anterior"}}})
+    assert msg.kind == MessageKind.TEXT and msg.text == "oi"
+    assert msg.sender == "42" and msg.message_id == "7"
+    assert msg.reply_to == "anterior"
+
+
+def test_parse_voice():
+    msg = _ch().parse_inbound({"message": {
+        "chat": {"id": 1}, "voice": {"file_id": "FID", "mime_type": "audio/ogg"}}})
+    assert msg.kind == MessageKind.AUDIO and msg.media.ref == "FID"
+
+
+def test_parse_photo_and_document():
+    photo = _ch().parse_inbound({"message": {
+        "chat": {"id": 1}, "photo": [{"file_id": "small"}, {"file_id": "big"}]}})
+    assert photo.kind == MessageKind.IMAGE and photo.media.ref == "big"  # largest size
+    doc = _ch().parse_inbound({"message": {
+        "chat": {"id": 1}, "document": {"file_id": "D", "file_name": "a.pdf"}}})
+    assert doc.kind == MessageKind.DOCUMENT and doc.media.filename == "a.pdf"
+
+
+def test_parse_reaction_and_skips_group():
+    msg = _ch().parse_inbound({"message_reaction": {
+        "chat": {"id": 5, "type": "private"}, "message_id": 99,
+        "new_reaction": [{"type": "emoji", "emoji": "❤"}]}})
+    assert msg.kind == MessageKind.REACTION and msg.reaction.emoji == "❤"
+    assert msg.reaction.target_message_id == "99"
+    grp = _ch().parse_inbound({"message_reaction": {
+        "chat": {"id": 5, "type": "supergroup"}, "message_id": 99,
+        "new_reaction": [{"type": "emoji", "emoji": "❤"}]}})
+    assert grp is None
+
+
+def test_non_message_payload_ignored():
+    assert _ch().parse_inbound({"edited_message": {}}) is None
+
+
+def test_verify():
+    ch = _ch()
+    assert ch.verify(headers={"x-telegram-bot-api-secret-token": "sek"}, body=b"") is True
+    assert ch.verify(headers={"x-telegram-bot-api-secret-token": "x"}, body=b"") is False
+
+
+async def test_send_chunks_text(fake_httpx):
+    fake_httpx.routes = {"sendMessage": FakeResponse({"result": {"message_id": 1}})}
+    res = await _ch().send("42", OutboundMessage(text="hi"))
+    assert res.ok
+    sends = [c for c in fake_httpx.calls if "sendMessage" in c["url"]]
+    assert sends and body_of(sends[0])["chat_id"] == "42"
+
+
+async def test_send_reaction(fake_httpx):
+    await _ch().send("42", OutboundMessage(reaction=Reaction("👍", "7")))
+    react = [c for c in fake_httpx.calls if "setMessageReaction" in c["url"]]
+    assert react and body_of(react[0])["reaction"][0]["emoji"] == "👍"
+
+
+async def test_fetch_media(fake_httpx):
+    fake_httpx.routes = {
+        "getFile": FakeResponse({"result": {"file_path": "voice/f.ogg"}}),
+        "/file/bot": FakeResponse(content=b"AUDIOBYTES"),
+    }
+    from cogno_gateway import MediaRef
+    data = await _ch().fetch_media(MediaRef(ref="FID"))
+    assert data == b"AUDIOBYTES"
