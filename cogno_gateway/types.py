@@ -32,7 +32,7 @@ class MediaRef:
     """A reference to a media item — a provider file id or a URL. The bytes are
     fetched lazily via ``Channel.fetch_media`` (e.g. to hand audio to cogno-vox)."""
 
-    ref: str               # provider file_id / media key / URL
+    ref: str = ""          # provider file_id / media key (empty for outbound-by-URL)
     mime: str = ""
     caption: str = ""
     filename: str = ""

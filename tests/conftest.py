@@ -18,7 +18,7 @@ class FakeResponse:
     def raise_for_status(self):
         if self.status_code >= 400:
             import httpx
-            raise httpx.HTTPStatusError("error", request=None, response=None)
+            raise httpx.HTTPError(f"HTTP {self.status_code}")
 
 
 class FakeAsyncClient:

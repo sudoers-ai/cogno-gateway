@@ -84,6 +84,28 @@ async def test_send_reaction(fake_httpx):
     assert react and body_of(react[0])["reaction"][0]["emoji"] == "👍"
 
 
+async def test_send_voice_note(fake_httpx):
+    fake_httpx.routes = {"sendVoice": FakeResponse({"result": {"message_id": 9}})}
+    res = await _ch().send("42", OutboundMessage(audio=b"OPUS", audio_format="ogg"))
+    assert res.ok
+    voice = [c for c in fake_httpx.calls if "sendVoice" in c["url"]]
+    assert voice and "voice" in voice[0]["files"]          # multipart voice upload
+    assert voice[0]["data"]["chat_id"] == "42"
+
+
+async def test_send_document(fake_httpx):
+    from cogno_gateway import MediaRef
+    await _ch().send("42", OutboundMessage(media=[MediaRef(url="http://x/a.pdf")]))
+    docs = [c for c in fake_httpx.calls if "sendDocument" in c["url"]]
+    assert docs and body_of(docs[0])["document"] == "http://x/a.pdf"
+
+
+async def test_send_returns_error_on_http_failure(fake_httpx):
+    fake_httpx.routes = {"sendMessage": FakeResponse(status=500)}
+    res = await _ch().send("42", OutboundMessage(text="hi"))
+    assert res.ok is False and "500" in res.error
+
+
 async def test_fetch_media(fake_httpx):
     fake_httpx.routes = {
         "getFile": FakeResponse({"result": {"file_path": "voice/f.ogg"}}),

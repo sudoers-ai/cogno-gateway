@@ -85,6 +85,18 @@ async def test_send_audio_base64(fake_httpx):
     assert base64.b64decode(body_of(audio)["audio"]) == b"OPUS"
 
 
+async def test_send_media(fake_httpx):
+    await _ch().send("5511@s.whatsapp.net", OutboundMessage(media=[MediaRef(url="http://x/d.pdf")]))
+    media = [c for c in fake_httpx.calls if "sendMedia" in c["url"]]
+    assert media and body_of(media[0])["media"] == "http://x/d.pdf"
+
+
+async def test_send_returns_error_on_http_failure(fake_httpx):
+    fake_httpx.routes = {"sendText": FakeResponse(status=500)}
+    res = await _ch().send("5511@s.whatsapp.net", OutboundMessage(text="hi"))
+    assert res.ok is False and "500" in res.error
+
+
 async def test_fetch_media_decodes_base64(fake_httpx):
     fake_httpx.routes = {"getBase64": FakeResponse(
         {"base64": base64.b64encode(b"IMG").decode()})}
