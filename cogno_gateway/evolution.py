@@ -16,6 +16,7 @@ Host injects per-tenant Evolution creds via ``ChannelConfig``: ``base_url``
 from __future__ import annotations
 
 import base64
+import logging
 from typing import Mapping, Optional
 
 import httpx
@@ -32,6 +33,8 @@ from cogno_gateway.types import (
     Reaction,
     SendResult,
 )
+
+logger = logging.getLogger("cogno_gateway.evolution")
 
 _MEDIA_TYPES = {
     "imageMessage": MessageKind.IMAGE,
@@ -61,7 +64,10 @@ class EvolutionChannel:
         if not self._cfg.secret:
             return True
         got = headers.get("apikey") or headers.get("authorization") or ""
-        return got == self._cfg.secret
+        ok = got == self._cfg.secret
+        if not ok:
+            logger.warning("channel=whatsapp event=verify_failed reason=invalid_apikey")
+        return ok
 
     # ── parse inbound (Evolution 'messages.upsert') ───────────────────
     def parse_inbound(self, payload: dict) -> Optional[InboundMessage]:
@@ -181,5 +187,7 @@ class EvolutionChannel:
                         json={"number": number, "media": m.url or m.ref,
                               "mediatype": "document", "caption": m.caption})
             except httpx.HTTPError as exc:
+                logger.warning("channel=whatsapp event=send_failed sent=%d error=%s", len(ids), exc)
                 return SendResult(ok=False, message_ids=ids, error=str(exc))
+        logger.debug("channel=whatsapp event=message_sent chunks=%d ok=true", len(ids))
         return SendResult(ok=True, message_ids=ids)

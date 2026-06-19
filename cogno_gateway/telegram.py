@@ -9,6 +9,7 @@ and injects the per-tenant bot token/secret via ``ChannelConfig``.
 
 from __future__ import annotations
 
+import logging
 from typing import Mapping, Optional
 
 import httpx
@@ -25,6 +26,8 @@ from cogno_gateway.types import (
     Reaction,
     SendResult,
 )
+
+logger = logging.getLogger("cogno_gateway.telegram")
 
 _API = "https://api.telegram.org"
 _SECRET_HEADER = "x-telegram-bot-api-secret-token"
@@ -44,7 +47,10 @@ class TelegramChannel:
         if not self._cfg.secret:
             return True  # secret token not configured → host guards the route
         got = headers.get(_SECRET_HEADER) or headers.get("X-Telegram-Bot-Api-Secret-Token") or ""
-        return got == self._cfg.secret
+        ok = got == self._cfg.secret
+        if not ok:
+            logger.warning("channel=telegram event=verify_failed reason=invalid_secret_token")
+        return ok
 
     # ── parse inbound ─────────────────────────────────────────────────
     def parse_inbound(self, payload: dict) -> Optional[InboundMessage]:
@@ -168,5 +174,7 @@ class TelegramChannel:
                     await client.post(f"{_API}/bot{self._token}/sendDocument",
                                       json={"chat_id": recipient, "document": m.url or m.ref})
             except httpx.HTTPError as exc:
+                logger.warning("channel=telegram event=send_failed sent=%d error=%s", len(ids), exc)
                 return SendResult(ok=False, message_ids=ids, error=str(exc))
+        logger.debug("channel=telegram event=message_sent chunks=%d ok=true", len(ids))
         return SendResult(ok=True, message_ids=ids)
