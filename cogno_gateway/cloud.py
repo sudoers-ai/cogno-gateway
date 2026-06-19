@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 from typing import Mapping, Optional
 
 import httpx
@@ -38,6 +39,8 @@ from cogno_gateway.types import (
     Reaction,
     SendResult,
 )
+
+logger = logging.getLogger("cogno_gateway.cloud")
 
 _DEFAULT_BASE = "https://graph.facebook.com/v21.0"
 _TYPE_KINDS = {
@@ -71,7 +74,10 @@ class WhatsAppCloudChannel:
             return True
         sig = headers.get("x-hub-signature-256") or headers.get("X-Hub-Signature-256") or ""
         expected = "sha256=" + hmac.new(self._cfg.secret.encode(), body, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(sig, expected)
+        ok = hmac.compare_digest(sig, expected)
+        if not ok:
+            logger.warning("channel=whatsapp_cloud event=verify_failed reason=hmac_mismatch")
+        return ok
 
     def verify_subscription(self, *, mode: str, token: str, challenge: str) -> Optional[str]:
         """For the GET webhook handshake: returns ``challenge`` iff the token
@@ -188,8 +194,12 @@ class WhatsAppCloudChannel:
                         "messaging_product": "whatsapp", "to": recipient, "type": "document",
                         "document": {"link": m.url or m.ref, "caption": m.caption}}))
             except httpx.HTTPError as exc:
+                logger.warning("channel=whatsapp_cloud event=send_failed sent=%d error=%s",
+                               len([i for i in ids if i]), exc)
                 return SendResult(ok=False, message_ids=ids, error=str(exc))
-        return SendResult(ok=True, message_ids=[i for i in ids if i])
+        sent = [i for i in ids if i]
+        logger.debug("channel=whatsapp_cloud event=message_sent chunks=%d ok=true", len(sent))
+        return SendResult(ok=True, message_ids=sent)
 
     def _template_body(self, recipient: str, template) -> dict:
         components = []

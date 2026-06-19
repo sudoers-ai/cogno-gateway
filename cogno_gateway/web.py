@@ -14,6 +14,7 @@ The contract is extended (optional) for rich content: an inbound ``kind`` +
 
 from __future__ import annotations
 
+import logging
 from typing import Mapping, Optional
 
 from cogno_gateway.types import (
@@ -24,6 +25,8 @@ from cogno_gateway.types import (
     Reaction,
     SendResult,
 )
+
+logger = logging.getLogger("cogno_gateway.web")
 
 
 class WebChannel:
@@ -44,7 +47,10 @@ class WebChannel:
         if not self._secret:
             return True
         token = headers.get("x-webchat-secret") or headers.get("X-Webchat-Secret") or ""
-        return token == self._secret
+        ok = token == self._secret
+        if not ok:
+            logger.warning("channel=web event=verify_failed reason=invalid_secret")
+        return ok
 
     def parse_inbound(self, payload: dict) -> Optional[InboundMessage]:
         session_id = str(payload.get("session_id") or payload.get("sender") or "")

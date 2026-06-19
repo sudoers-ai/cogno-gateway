@@ -46,6 +46,17 @@ def test_verify_with_secret():
     assert WebChannel().verify(headers={}, body=b"") is True   # open without secret
 
 
+def test_verify_failure_logs_warning(caplog):
+    import logging
+    ch = WebChannel(secret="shh")
+    with caplog.at_level(logging.WARNING, logger="cogno_gateway.web"):
+        assert ch.verify(headers={"x-webchat-secret": "nope"}, body=b"") is False
+        ch.verify(headers={"x-webchat-secret": "shh"}, body=b"")   # ok → no warning
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "channel=web event=verify_failed" in warnings[0].message
+
+
 def test_serialize_rich_reply():
     from cogno_gateway import MediaRef, Reaction
     out = WebChannel().serialize("s1", OutboundMessage(
