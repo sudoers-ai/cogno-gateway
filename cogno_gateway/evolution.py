@@ -16,6 +16,7 @@ Host injects per-tenant Evolution creds via ``ChannelConfig``: ``base_url``
 from __future__ import annotations
 
 import base64
+import hmac
 import logging
 from typing import Mapping, Optional
 
@@ -55,6 +56,8 @@ class EvolutionChannel:
         self._cfg = config
         self._base = config.base_url.rstrip("/")
         self._instance = config.instance
+        if not config.secret:
+            logger.warning("channel=whatsapp event=verify_open reason=no_secret_configured")
 
     def _headers(self) -> dict:
         return {"apikey": self._cfg.token, "Content-Type": "application/json"}
@@ -64,7 +67,7 @@ class EvolutionChannel:
         if not self._cfg.secret:
             return True
         got = headers.get("apikey") or headers.get("authorization") or ""
-        ok = got == self._cfg.secret
+        ok = hmac.compare_digest(got.encode(), self._cfg.secret.encode())
         if not ok:
             logger.warning("channel=whatsapp event=verify_failed reason=invalid_apikey")
         return ok

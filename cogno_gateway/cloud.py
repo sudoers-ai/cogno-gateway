@@ -63,6 +63,8 @@ class WhatsAppCloudChannel:
         self._cfg = config
         self._base = (config.base_url or _DEFAULT_BASE).rstrip("/")
         self._phone_id = config.instance
+        if not config.secret:
+            logger.warning("channel=whatsapp_cloud event=verify_open reason=no_secret_configured")
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self._cfg.token}", "Content-Type": "application/json"}
@@ -83,7 +85,7 @@ class WhatsAppCloudChannel:
         """For the GET webhook handshake: returns ``challenge`` iff the token
         matches ``extra['verify_token']`` (else ``None`` → host returns 403)."""
         want = str(self._cfg.extra.get("verify_token", ""))
-        if mode == "subscribe" and want and token == want:
+        if mode == "subscribe" and want and hmac.compare_digest(token.encode(), want.encode()):
             return challenge
         return None
 

@@ -30,6 +30,15 @@ def test_requires_full_config():
         EvolutionChannel(ChannelConfig(base_url="x"))
 
 
+def test_verify():
+    ch = EvolutionChannel(ChannelConfig(base_url="http://evo:8080/", token="APIKEY",
+                                        instance="inst1", secret="sek"))
+    assert ch.verify(headers={"apikey": "sek"}, body=b"") is True
+    assert ch.verify(headers={"apikey": "wrong"}, body=b"") is False
+    # open when no secret configured (host guards the route)
+    assert _ch().verify(headers={}, body=b"") is True
+
+
 def test_parse_conversation():
     msg = _ch().parse_inbound(_upsert(
         key={"remoteJid": "5511@s.whatsapp.net", "fromMe": False, "id": "M1"},
