@@ -63,6 +63,28 @@ def test_parse_media():
     assert msg.media.ref == "M4"
 
 
+def test_parse_buttons_and_list_response():
+    btn = _ch().parse_inbound(_upsert(
+        key={"remoteJid": "5511@s.whatsapp.net", "id": "M"},
+        message={"buttonsResponseMessage": {"selectedButtonId": "yes",
+                                            "selectedDisplayText": "Sim"}}))
+    assert btn.kind == MessageKind.INTERACTIVE and btn.selection.id == "yes"
+    lst = _ch().parse_inbound(_upsert(
+        key={"remoteJid": "5511@s.whatsapp.net", "id": "M"},
+        message={"listResponseMessage": {"title": "Opção A",
+                                         "singleSelectReply": {"selectedRowId": "row1"}}}))
+    assert lst.selection.id == "row1" and lst.text == "Opção A"
+
+
+async def test_send_buttons(fake_httpx):
+    from cogno_gateway import Button
+    fake_httpx.routes = {"sendButtons": FakeResponse({"key": {"id": "B1"}})}
+    await _ch().send("5511@s.whatsapp.net",
+                     OutboundMessage(text="Confirma?", buttons=[Button("yes", "Sim")]))
+    b = body_of([c for c in fake_httpx.calls if "sendButtons" in c["url"]][0])
+    assert b["buttons"][0] == {"type": "reply", "displayText": "Sim", "id": "yes"}
+
+
 def test_ignores_from_me_groups_and_non_upsert():
     ch = _ch()
     assert ch.parse_inbound(_upsert(key={"remoteJid": "x", "fromMe": True})) is None

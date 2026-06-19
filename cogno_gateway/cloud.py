@@ -28,6 +28,7 @@ import httpx
 from cogno_gateway.chunker import split_message
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
+    ButtonReply,
     ChannelConfig,
     InboundMessage,
     Location,
@@ -92,14 +93,24 @@ class WhatsAppCloudChannel:
         mtype = message.get("type", "")
 
         def mk(kind: MessageKind, *, text: str = "", media: Optional[MediaRef] = None,
-               reaction: Optional[Reaction] = None,
-               location: Optional[Location] = None) -> InboundMessage:
+               reaction: Optional[Reaction] = None, location: Optional[Location] = None,
+               selection: Optional[ButtonReply] = None) -> InboundMessage:
             return InboundMessage(channel=self.name, sender=sender, kind=kind,
                                   message_id=message_id, text=text, media=media,
-                                  reaction=reaction, location=location, raw=message)
+                                  reaction=reaction, location=location, selection=selection,
+                                  raw=message)
 
         if mtype == "text":
             return mk(MessageKind.TEXT, text=message.get("text", {}).get("body", ""))
+        if mtype == "interactive":
+            inter = message.get("interactive", {})
+            sel = inter.get(inter.get("type", ""), {}) or {}
+            return mk(MessageKind.INTERACTIVE, text=sel.get("title", ""),
+                      selection=ButtonReply(id=str(sel.get("id", "")), title=sel.get("title", "")))
+        if mtype == "button":   # template quick-reply button
+            b = message.get("button", {})
+            return mk(MessageKind.INTERACTIVE, text=b.get("text", ""),
+                      selection=ButtonReply(id=str(b.get("payload", "")), title=b.get("text", "")))
         if mtype == "reaction":
             r = message.get("reaction", {})
             return mk(MessageKind.REACTION,
@@ -145,10 +156,18 @@ class WhatsAppCloudChannel:
                         "messaging_product": "whatsapp", "to": recipient, "type": "reaction",
                         "reaction": {"message_id": message.reaction.target_message_id,
                                      "emoji": message.reaction.emoji}})
-                for chunk in split_message(message.text, max_chars=max_chars):
+                if message.buttons:
                     ids.append(await self._post(client, url, {
-                        "messaging_product": "whatsapp", "to": recipient, "type": "text",
-                        "text": {"body": chunk}}))
+                        "messaging_product": "whatsapp", "to": recipient, "type": "interactive",
+                        "interactive": {"type": "button", "body": {"text": message.text or " "},
+                                        "action": {"buttons": [
+                                            {"type": "reply", "reply": {"id": b.id, "title": b.title}}
+                                            for b in message.buttons]}}}))
+                else:
+                    for chunk in split_message(message.text, max_chars=max_chars):
+                        ids.append(await self._post(client, url, {
+                            "messaging_product": "whatsapp", "to": recipient, "type": "text",
+                            "text": {"body": chunk}}))
                 if message.audio is not None:
                     media_id = await self._upload_media(
                         client, message.audio, f"audio/{message.audio_format}",

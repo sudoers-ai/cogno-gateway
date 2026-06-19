@@ -48,9 +48,11 @@ else:
 ```
 
 `InboundMessage` is content-typed (`MessageKind`): `TEXT`, `IMAGE`, `AUDIO`,
-`VIDEO`, `DOCUMENT`, `LOCATION`, `CONTACT`, `REACTION`, `STICKER`. Media is a
+`VIDEO`, `DOCUMENT`, `LOCATION`, `REACTION`, `STICKER`, `INTERACTIVE`. Media is a
 `MediaRef` (provider file id / URL) you resolve lazily with `fetch_media`;
-reactions carry `emoji` + `target_message_id`; replies carry `reply_to`.
+reactions carry `emoji` + `target_message_id`; replies carry `reply_to`. A tapped
+quick-reply / list option / inline button arrives as `kind=INTERACTIVE` with
+`selection: ButtonReply(id, title)` — the `id` is the payload you sent.
 
 ---
 
@@ -64,7 +66,15 @@ await channel.send(msg.sender, OutboundMessage(audio=tts_bytes,                #
                                                audio_format="opus"))
 await channel.send(msg.sender, OutboundMessage(media=[MediaRef(url="https://…/file.pdf")]))
 await channel.send(msg.sender, OutboundMessage(reaction=Reaction("👍", msg.message_id)))
+
+from cogno_gateway import Button                                                # quick-reply buttons
+await channel.send(msg.sender, OutboundMessage(text="Confirmar agendamento?",
+    buttons=[Button("confirm", "Sim ✅"), Button("cancel", "Não ❌")]))
 ```
+
+Buttons render natively per channel — Telegram inline keyboard, WhatsApp Cloud
+interactive buttons, Evolution `sendButtons`. The user's tap comes back as an
+`INTERACTIVE` inbound carrying `selection.id` (`"confirm"` / `"cancel"`).
 
 `send` chunks long text (`split_message`, default 600 chars / 6 chunks — override
 via `ChannelConfig.max_chars`) and returns a `SendResult(ok, message_ids, error)`.

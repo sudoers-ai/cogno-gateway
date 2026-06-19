@@ -16,6 +16,7 @@ import httpx
 from cogno_gateway.chunker import split_message
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
+    ButtonReply,
     ChannelConfig,
     InboundMessage,
     MediaRef,
@@ -50,10 +51,22 @@ class TelegramChannel:
         reaction = payload.get("message_reaction")
         if reaction:
             return self._parse_reaction(reaction)
+        callback = payload.get("callback_query")
+        if callback:
+            return self._parse_callback(callback)
         message = payload.get("message")
         if not message:
-            return None  # callbacks/edits/etc. — ignored
+            return None  # edits/etc. — ignored
         return self._parse_message(message)
+
+    def _parse_callback(self, callback: dict) -> Optional[InboundMessage]:
+        chat = (callback.get("message", {}) or {}).get("chat", {})
+        data = callback.get("data", "")
+        # Telegram echoes only callback_data; the title is not resent.
+        return InboundMessage(
+            channel=self.name, sender=str(chat.get("id", "")), kind=MessageKind.INTERACTIVE,
+            message_id=str((callback.get("message", {}) or {}).get("message_id", "")),
+            text=data, selection=ButtonReply(id=data, title=data), raw=callback)
 
     def _parse_reaction(self, reaction: dict) -> Optional[InboundMessage]:
         chat = reaction.get("chat", {})
@@ -124,9 +137,18 @@ class TelegramChannel:
                         json={"chat_id": recipient,
                               "message_id": int(message.reaction.target_message_id or 0),
                               "reaction": [{"type": "emoji", "emoji": message.reaction.emoji}]})
-                for chunk in split_message(message.text, max_chars=max_chars):
-                    resp = await client.post(f"{_API}/bot{self._token}/sendMessage",
-                                             json={"chat_id": recipient, "text": chunk})
+                chunks = split_message(message.text, max_chars=max_chars)
+                markup = None
+                if message.buttons:
+                    markup = {"inline_keyboard": [
+                        [{"text": b.title, "callback_data": b.id}] for b in message.buttons]}
+                    if not chunks:
+                        chunks = [message.text or " "]   # buttons need a message body
+                for i, chunk in enumerate(chunks):
+                    body: dict = {"chat_id": recipient, "text": chunk}
+                    if markup and i == len(chunks) - 1:
+                        body["reply_markup"] = markup
+                    resp = await client.post(f"{_API}/bot{self._token}/sendMessage", json=body)
                     resp.raise_for_status()
                     ids.append(str(resp.json().get("result", {}).get("message_id", "")))
                 if message.audio is not None:

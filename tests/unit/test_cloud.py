@@ -59,6 +59,31 @@ def test_parse_image_and_location():
     assert loc.kind == MessageKind.LOCATION and loc.location.latitude == -23.5
 
 
+def test_parse_interactive_button_and_list_reply():
+    btn = _ch().parse_inbound(_evt({"from": "5511", "id": "x", "type": "interactive",
+        "interactive": {"type": "button_reply", "button_reply": {"id": "yes", "title": "Sim"}}}))
+    assert btn.kind == MessageKind.INTERACTIVE
+    assert btn.selection.id == "yes" and btn.selection.title == "Sim"
+    lst = _ch().parse_inbound(_evt({"from": "5511", "id": "x", "type": "interactive",
+        "interactive": {"type": "list_reply", "list_reply": {"id": "row1", "title": "Opção A"}}}))
+    assert lst.selection.id == "row1"
+
+
+def test_parse_template_quick_reply_button():
+    msg = _ch().parse_inbound(_evt({"from": "5511", "id": "x", "type": "button",
+                                    "button": {"payload": "PL", "text": "Confirmar"}}))
+    assert msg.kind == MessageKind.INTERACTIVE and msg.selection.id == "PL"
+
+
+async def test_send_buttons_interactive(fake_httpx):
+    from cogno_gateway import Button
+    fake_httpx.routes = {"/messages": FakeResponse({"messages": [{"id": "B1"}]})}
+    await _ch().send("5511", OutboundMessage(text="Confirma?", buttons=[Button("yes", "Sim")]))
+    b = body_of([c for c in fake_httpx.calls if "/messages" in c["url"]][0])
+    assert b["type"] == "interactive"
+    assert b["interactive"]["action"]["buttons"][0]["reply"] == {"id": "yes", "title": "Sim"}
+
+
 def test_statuses_event_ignored():
     assert _ch().parse_inbound({"entry": [{"changes": [{"value": {"statuses": [{}]}}]}]}) is None
     assert _ch().parse_inbound({"object": "x"}) is None

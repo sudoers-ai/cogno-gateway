@@ -23,6 +23,7 @@ import httpx
 from cogno_gateway.chunker import split_message
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
+    ButtonReply,
     ChannelConfig,
     InboundMessage,
     MediaRef,
@@ -78,16 +79,28 @@ class EvolutionChannel:
         msg_type = data.get("messageType", "")
 
         def mk(kind: MessageKind, *, text: str = "", media: Optional[MediaRef] = None,
-               reaction: Optional[Reaction] = None) -> InboundMessage:
+               reaction: Optional[Reaction] = None,
+               selection: Optional[ButtonReply] = None) -> InboundMessage:
             return InboundMessage(channel=self.name, sender=sender, kind=kind,
                                   message_id=message_id, text=text, media=media,
-                                  reaction=reaction, raw=data)
+                                  reaction=reaction, selection=selection, raw=data)
 
         if "reactionMessage" in msg:
             rm = msg["reactionMessage"]
             return mk(MessageKind.REACTION,
                       reaction=Reaction(emoji=rm.get("text", ""),
                                         target_message_id=str(rm.get("key", {}).get("id", ""))))
+        if "buttonsResponseMessage" in msg:
+            br = msg["buttonsResponseMessage"]
+            return mk(MessageKind.INTERACTIVE, text=br.get("selectedDisplayText", ""),
+                      selection=ButtonReply(id=str(br.get("selectedButtonId", "")),
+                                            title=br.get("selectedDisplayText", "")))
+        if "listResponseMessage" in msg:
+            lr = msg["listResponseMessage"]
+            row = lr.get("singleSelectReply", {}) or {}
+            return mk(MessageKind.INTERACTIVE, text=lr.get("title", ""),
+                      selection=ButtonReply(id=str(row.get("selectedRowId", "")),
+                                            title=lr.get("title", "")))
         if msg_type == "conversation":
             return mk(MessageKind.TEXT, text=msg.get("conversation", ""))
         if msg_type == "extendedTextMessage":
@@ -125,12 +138,22 @@ class EvolutionChannel:
                         json={"key": {"remoteJid": recipient, "fromMe": False,
                                       "id": message.reaction.target_message_id},
                               "reaction": message.reaction.emoji})
-                for chunk in split_message(message.text, max_chars=max_chars):
+                if message.buttons:
                     resp = await client.post(
-                        f"{self._base}/message/sendText/{self._instance}",
-                        headers=self._headers(), json={"number": number, "text": chunk})
+                        f"{self._base}/message/sendButtons/{self._instance}",
+                        headers=self._headers(),
+                        json={"number": number, "title": "", "description": message.text or " ",
+                              "buttons": [{"type": "reply", "displayText": b.title, "id": b.id}
+                                          for b in message.buttons]})
                     resp.raise_for_status()
                     ids.append(str(resp.json().get("key", {}).get("id", "")))
+                else:
+                    for chunk in split_message(message.text, max_chars=max_chars):
+                        resp = await client.post(
+                            f"{self._base}/message/sendText/{self._instance}",
+                            headers=self._headers(), json={"number": number, "text": chunk})
+                        resp.raise_for_status()
+                        ids.append(str(resp.json().get("key", {}).get("id", "")))
                 if message.audio is not None:
                     audio_b64 = base64.b64encode(message.audio).decode("ascii")
                     resp = await client.post(

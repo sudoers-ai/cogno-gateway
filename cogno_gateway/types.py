@@ -24,6 +24,7 @@ class MessageKind(str, Enum):
     CONTACT = "contact"
     REACTION = "reaction"
     STICKER = "sticker"
+    INTERACTIVE = "interactive"   # a quick-reply / list / inline-button selection
     UNKNOWN = "unknown"
 
 
@@ -46,6 +47,24 @@ class Reaction:
 
     emoji: str
     target_message_id: str
+
+
+@dataclass
+class Button:
+    """A quick-reply button to offer (outbound). ``id`` is the stable payload the
+    provider echoes back when tapped; ``title`` is the visible label."""
+
+    id: str
+    title: str
+
+
+@dataclass
+class ButtonReply:
+    """The user's tap on a button / list option (inbound). ``id`` is the payload
+    you sent; ``title`` is what they saw."""
+
+    id: str
+    title: str = ""
 
 
 @dataclass
@@ -78,6 +97,7 @@ class InboundMessage:
     media: Optional[MediaRef] = None
     reaction: Optional[Reaction] = None
     location: Optional[Location] = None
+    selection: Optional[ButtonReply] = None   # a tapped quick-reply / list option
     reply_to: str = ""                 # quoted/replied-to text, if any
     raw: dict = field(default_factory=dict)
 
@@ -92,6 +112,7 @@ class OutboundMessage:
     audio_format: str = "opus"
     media: list[MediaRef] = field(default_factory=list)
     reaction: Optional[Reaction] = None
+    buttons: list["Button"] = field(default_factory=list)   # quick-replies under the text
     template: Optional["Template"] = None   # proactive send outside the 24h window
 
 

@@ -64,6 +64,23 @@ def test_non_message_payload_ignored():
     assert _ch().parse_inbound({"edited_message": {}}) is None
 
 
+def test_parse_callback_query():
+    msg = _ch().parse_inbound({"callback_query": {
+        "data": "confirm_yes", "message": {"chat": {"id": 7}, "message_id": 50}}})
+    assert msg.kind == MessageKind.INTERACTIVE
+    assert msg.sender == "7" and msg.selection.id == "confirm_yes"
+
+
+async def test_send_inline_buttons(fake_httpx):
+    from cogno_gateway import Button
+    fake_httpx.routes = {"sendMessage": FakeResponse({"result": {"message_id": 1}})}
+    await _ch().send("42", OutboundMessage(text="Confirma?",
+                                           buttons=[Button("yes", "Sim"), Button("no", "Não")]))
+    last = [c for c in fake_httpx.calls if "sendMessage" in c["url"]][-1]
+    kb = body_of(last)["reply_markup"]["inline_keyboard"]
+    assert kb[0][0] == {"text": "Sim", "callback_data": "yes"}
+
+
 def test_verify():
     ch = _ch()
     assert ch.verify(headers={"x-telegram-bot-api-secret-token": "sek"}, body=b"") is True

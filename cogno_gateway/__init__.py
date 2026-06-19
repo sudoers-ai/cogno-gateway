@@ -12,6 +12,8 @@ endpoint and wires parsed messages into cognition (and cogno-vox for audio).
 """
 
 from cogno_gateway.types import (
+    Button,
+    ButtonReply,
     ChannelConfig,
     InboundMessage,
     Location,
@@ -37,6 +39,8 @@ __all__ = [
     "MediaRef",
     "Reaction",
     "Location",
+    "Button",
+    "ButtonReply",
     "Template",
     "ChannelConfig",
     "SendResult",

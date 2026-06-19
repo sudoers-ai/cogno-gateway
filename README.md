@@ -28,7 +28,7 @@ await tg.send(msg.sender, OutboundMessage(text="resposta"))   # auto-chunked
 
 ## Rich, content-typed messages
 
-`InboundMessage.kind` is a `MessageKind`: `TEXT · IMAGE · AUDIO · VIDEO · DOCUMENT · LOCATION · CONTACT · REACTION · STICKER`. So a host handles **reactions** (emoji + target message id), **media** (a `MediaRef` resolved lazily via `fetch_media` — e.g. to feed audio to cogno-vox), replies, and plain text uniformly across channels.
+`InboundMessage.kind` is a `MessageKind`: `TEXT · IMAGE · AUDIO · VIDEO · DOCUMENT · LOCATION · REACTION · STICKER · INTERACTIVE`. So a host handles **reactions** (emoji + target message id), **media** (a `MediaRef` resolved lazily via `fetch_media` — e.g. to feed audio to cogno-vox), **quick-reply buttons** (send `OutboundMessage(buttons=[Button(...)])`; the tap returns `kind=INTERACTIVE` with `selection.id`), replies, and plain text uniformly across channels.
 
 ## Decoupled from cognition & audio
 
