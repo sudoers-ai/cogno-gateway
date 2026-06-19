@@ -42,6 +42,8 @@ class TelegramChannel:
             raise GatewayError("TelegramChannel requires config.token (bot token)")
         self._cfg = config
         self._token = config.token
+        if not config.secret:
+            logger.warning("channel=telegram event=verify_open reason=no_secret_configured")
 
     # ── verify ────────────────────────────────────────────────────────
     def verify(self, *, headers: Mapping[str, str], body: bytes) -> bool:

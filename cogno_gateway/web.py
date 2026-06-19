@@ -41,6 +41,8 @@ class WebChannel:
 
     def __init__(self, *, secret: str = "") -> None:
         self._secret = secret
+        if not secret:
+            logger.warning("channel=web event=verify_open reason=no_secret_configured")
 
     def verify(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         """Optional shared-secret check (e.g. an ``X-Webchat-Secret`` header). With

@@ -46,6 +46,13 @@ def test_verify_with_secret():
     assert WebChannel().verify(headers={}, body=b"") is True   # open without secret
 
 
+def test_no_secret_warns_verify_open(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="cogno_gateway.web"):
+        WebChannel()                       # no secret → fail-open, must be loud
+    assert any("event=verify_open" in r.message for r in caplog.records)
+
+
 def test_verify_failure_logs_warning(caplog):
     import logging
     ch = WebChannel(secret="shh")

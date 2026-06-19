@@ -56,6 +56,8 @@ class EvolutionChannel:
         self._cfg = config
         self._base = config.base_url.rstrip("/")
         self._instance = config.instance
+        if not config.secret:
+            logger.warning("channel=whatsapp event=verify_open reason=no_secret_configured")
 
     def _headers(self) -> dict:
         return {"apikey": self._cfg.token, "Content-Type": "application/json"}
