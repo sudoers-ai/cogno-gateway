@@ -77,13 +77,35 @@ A transport failure is returned (`ok=False`), not raised, so the host decides.
 | Channel | `kind` | Config | Notes |
 | --- | --- | --- | --- |
 | Telegram | `"telegram"` | `token` (bot), `secret` (webhook) | Bot API over httpx |
-| WhatsApp | `"whatsapp"` / `"evolution"` | `base_url`, `token` (apikey), `instance`, `secret` | **Evolution API** (unofficial) |
+| WhatsApp (Evolution) | `"evolution"` / `"whatsapp"` | `base_url`, `token` (apikey), `instance`, `secret` | **unofficial** (QR/Baileys) — dev/testing |
+| WhatsApp (Cloud) | `"whatsapp_cloud"` / `"cloud"` / `"meta"` | `token` (access token), `instance` (phone number id), `secret` (app secret), `extra["verify_token"]` | **official Meta Cloud API** — production/compliance |
 | Web | `"web"` | `secret` (optional) | the cogno-cloud-ui `{session_id, message}` ⇄ `{session_id, response}` contract — `send` returns a dict via `serialize(...)` |
 
-> **WhatsApp provider** — the MVP uses **Evolution** (unofficial, free, full-featured;
-> ban-risk accepted). Because channels are pluggable behind the `Channel` port, an
-> official **`WhatsAppCloudChannel`** (Meta Cloud API) is planned to drop in for
-> production/compliance — see the `TODO(WhatsAppCloudChannel)` in `evolution.py`.
+> **WhatsApp provider is pluggable** behind the `Channel` port: **Evolution** (free,
+> unofficial) for dev, **Cloud API** (official) for production. The host picks per
+> tenant.
+
+### WhatsApp Cloud — reactive model & the 24h window
+
+A user message opens a **24h customer-service window**. Inside it you reply
+**free-form** (text/media/reaction), for free. A **proactive** message *outside*
+the window (e.g. an appointment reminder) must use a pre-approved **template**:
+
+```python
+from cogno_gateway import OutboundMessage, Template
+
+# inside the window (the user just messaged) — free-form:
+await cloud.send(to, OutboundMessage(text="Confirmado para 3ª às 14h ✅"))
+
+# outside the window (proactive reminder) — pre-approved template:
+await cloud.send(to, OutboundMessage(template=Template(
+    "appointment_reminder", lang="pt_BR", params=["3ª feira", "14h"])))
+```
+
+*Deciding* free-form vs template (is the window open?) is **host policy** — you
+track the user's last-inbound timestamp. The adapter just supports both sends.
+The GET webhook handshake is `cloud.verify_subscription(mode=, token=, challenge=)`;
+the POST signature is `cloud.verify(headers=, body=)` (HMAC-SHA256).
 
 ---
 

@@ -56,6 +56,17 @@ class Location:
 
 
 @dataclass
+class Template:
+    """A pre-approved provider template (e.g. a WhatsApp Cloud API ``utility``
+    template for a proactive reminder sent outside the 24h service window). The
+    ``params`` fill the template's body placeholders in order."""
+
+    name: str
+    lang: str = "pt_BR"
+    params: list[str] = field(default_factory=list)
+
+
+@dataclass
 class InboundMessage:
     """A message received from a channel, normalized."""
 
@@ -81,6 +92,7 @@ class OutboundMessage:
     audio_format: str = "opus"
     media: list[MediaRef] = field(default_factory=list)
     reaction: Optional[Reaction] = None
+    template: Optional["Template"] = None   # proactive send outside the 24h window
 
 
 @dataclass

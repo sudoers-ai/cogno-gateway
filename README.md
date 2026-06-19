@@ -34,9 +34,12 @@ await tg.send(msg.sender, OutboundMessage(text="resposta"))   # auto-chunked
 
 The gateway imports neither `cogno-anima` nor `cogno-vox`. Inbound audio comes back as **bytes** (`fetch_media`) for the host to run through vox STT; a voice reply is just `OutboundMessage(audio=tts_bytes)`. The host wires the two edges to the pipeline.
 
-## WhatsApp provider
+## WhatsApp: two providers, one port
 
-The MVP ships **`EvolutionChannel`** (Evolution API — unofficial, QR/Baileys, free, full-featured; ban-risk accepted). Because channels are pluggable, an official **`WhatsAppCloudChannel`** (Meta Cloud API) is planned to drop in for production/compliance — tracked as `TODO(WhatsAppCloudChannel)` in `evolution.py`.
+WhatsApp is pluggable — the host picks per tenant:
+
+- **`EvolutionChannel`** (`"evolution"`) — Evolution API, unofficial (QR/Baileys), free, full-featured; good for dev/testing.
+- **`WhatsAppCloudChannel`** (`"whatsapp_cloud"`) — the **official Meta Cloud API**, for production/compliance: HMAC webhook verification, free-form replies within the 24h service window, and **template** messages for proactive sends outside it (`OutboundMessage(template=Template(...))`).
 
 ## Install
 

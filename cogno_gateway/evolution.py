@@ -3,14 +3,10 @@ cogno_gateway.evolution — the WhatsApp channel via the Evolution API.
 
 Ported clean-room from the parent ``cogno.gateways.whatsapp`` (Evolution API),
 async + decoupled from FastAPI/DB/feedback. Evolution is an **unofficial**
-WhatsApp gateway (Baileys/QR) — fine for MVP, ban-risk accepted. The official
-``WhatsAppCloudChannel`` (Meta Cloud API) drops in behind the same ``Channel``
-port later — see the TODO below.
-
-# TODO(WhatsAppCloudChannel): implement the official Meta WhatsApp Cloud API
-# adapter (Graph API webhooks + /messages send + media via media-id) so a
-# host can pick the compliant provider per tenant. Tracked in the gateway
-# blueprint; deferred from the MVP per product decision.
+WhatsApp gateway (Baileys/QR) — free, full-featured, ban-risk accepted; good for
+dev/testing. The official, compliant alternative is ``WhatsAppCloudChannel``
+(``cogno_gateway.cloud``), which satisfies the same ``Channel`` port — the host
+picks the provider per tenant.
 
 Host injects per-tenant Evolution creds via ``ChannelConfig``: ``base_url``
 (instance URL), ``token`` (apikey), ``instance`` (instance name), ``secret``

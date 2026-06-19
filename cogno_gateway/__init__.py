@@ -20,12 +20,14 @@ from cogno_gateway.types import (
     OutboundMessage,
     Reaction,
     SendResult,
+    Template,
 )
 from cogno_gateway.ports import Channel, GatewayError
 from cogno_gateway.chunker import split_message
 from cogno_gateway.web import WebChannel
 from cogno_gateway.telegram import TelegramChannel
 from cogno_gateway.evolution import EvolutionChannel
+from cogno_gateway.cloud import WhatsAppCloudChannel
 from cogno_gateway.factory import create_channel
 
 __all__ = [
@@ -35,6 +37,7 @@ __all__ = [
     "MediaRef",
     "Reaction",
     "Location",
+    "Template",
     "ChannelConfig",
     "SendResult",
     "Channel",
@@ -43,5 +46,6 @@ __all__ = [
     "WebChannel",
     "TelegramChannel",
     "EvolutionChannel",
+    "WhatsAppCloudChannel",
     "create_channel",
 ]
