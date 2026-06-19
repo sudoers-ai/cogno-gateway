@@ -33,6 +33,7 @@ from cogno_gateway.telegram import TelegramChannel
 from cogno_gateway.evolution import EvolutionChannel
 from cogno_gateway.cloud import WhatsAppCloudChannel
 from cogno_gateway.factory import create_channel
+from cogno_gateway.options import options_to_message, user_input
 
 __all__ = [
     "MessageKind",
@@ -56,4 +57,6 @@ __all__ = [
     "EvolutionChannel",
     "WhatsAppCloudChannel",
     "create_channel",
+    "options_to_message",
+    "user_input",
 ]

@@ -108,6 +108,13 @@ class WebChannel:
         if message.reaction:
             out["reaction"] = {"emoji": message.reaction.emoji,
                                "target_message_id": message.reaction.target_message_id}
+        if message.buttons:
+            out["buttons"] = [{"id": b.id, "title": b.title} for b in message.buttons]
+        if message.list_menu is not None:
+            out["list"] = {"button": message.list_menu.button,
+                           "sections": [{"title": s.title,
+                                         "rows": [{"id": r.id, "title": r.title} for r in s.rows]}
+                                        for s in message.list_menu.sections]}
         return out
 
 

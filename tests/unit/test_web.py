@@ -57,6 +57,16 @@ def test_serialize_rich_reply():
     assert out["reaction"] == {"emoji": "👍", "target_message_id": "m1"}
 
 
+def test_serialize_buttons_and_list():
+    from cogno_gateway import Button, ListMenu, ListSection
+    btn = WebChannel().serialize("s1", OutboundMessage(text="?", buttons=[Button("a", "A")]))
+    assert btn["buttons"] == [{"id": "a", "title": "A"}]
+    lst = WebChannel().serialize("s1", OutboundMessage(text="?", list_menu=ListMenu(
+        button="Ver", sections=[ListSection("S", [Button("x", "X")])])))
+    assert lst["list"]["button"] == "Ver"
+    assert lst["list"]["sections"][0]["rows"][0] == {"id": "x", "title": "X"}
+
+
 async def test_send_is_noop_ok():
     res = await WebChannel().send("s1", OutboundMessage(text="oi"))
     assert res.ok is True
