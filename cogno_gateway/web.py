@@ -14,6 +14,7 @@ The contract is extended (optional) for rich content: an inbound ``kind`` +
 
 from __future__ import annotations
 
+import hmac
 import logging
 from typing import Mapping, Optional
 
@@ -47,7 +48,7 @@ class WebChannel:
         if not self._secret:
             return True
         token = headers.get("x-webchat-secret") or headers.get("X-Webchat-Secret") or ""
-        ok = token == self._secret
+        ok = hmac.compare_digest(token.encode(), self._secret.encode())
         if not ok:
             logger.warning("channel=web event=verify_failed reason=invalid_secret")
         return ok

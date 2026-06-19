@@ -9,6 +9,7 @@ and injects the per-tenant bot token/secret via ``ChannelConfig``.
 
 from __future__ import annotations
 
+import hmac
 import logging
 from typing import Mapping, Optional
 
@@ -47,7 +48,7 @@ class TelegramChannel:
         if not self._cfg.secret:
             return True  # secret token not configured → host guards the route
         got = headers.get(_SECRET_HEADER) or headers.get("X-Telegram-Bot-Api-Secret-Token") or ""
-        ok = got == self._cfg.secret
+        ok = hmac.compare_digest(got.encode(), self._cfg.secret.encode())
         if not ok:
             logger.warning("channel=telegram event=verify_failed reason=invalid_secret_token")
         return ok
