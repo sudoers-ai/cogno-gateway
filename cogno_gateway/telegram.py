@@ -139,9 +139,14 @@ class TelegramChannel:
                               "reaction": [{"type": "emoji", "emoji": message.reaction.emoji}]})
                 chunks = split_message(message.text, max_chars=max_chars)
                 markup = None
-                if message.buttons:
+                # Telegram has no native list UI — render buttons and list rows alike
+                # as an inline keyboard (one option per row).
+                kb_buttons = list(message.buttons)
+                if message.list_menu is not None:
+                    kb_buttons += [r for s in message.list_menu.sections for r in s.rows]
+                if kb_buttons:
                     markup = {"inline_keyboard": [
-                        [{"text": b.title, "callback_data": b.id}] for b in message.buttons]}
+                        [{"text": b.title, "callback_data": b.id}] for b in kb_buttons]}
                     if not chunks:
                         chunks = [message.text or " "]   # buttons need a message body
                 for i, chunk in enumerate(chunks):

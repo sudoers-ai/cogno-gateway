@@ -81,6 +81,17 @@ async def test_send_inline_buttons(fake_httpx):
     assert kb[0][0] == {"text": "Sim", "callback_data": "yes"}
 
 
+async def test_send_list_as_inline_keyboard(fake_httpx):
+    from cogno_gateway import Button, ListMenu, ListSection
+    fake_httpx.routes = {"sendMessage": FakeResponse({"result": {"message_id": 1}})}
+    menu = ListMenu(sections=[ListSection("S", [Button("a", "A"), Button("b", "B"),
+                                                Button("c", "C"), Button("d", "D")])])
+    await _ch().send("42", OutboundMessage(text="Escolha:", list_menu=menu))
+    kb = body_of([c for c in fake_httpx.calls if "sendMessage" in c["url"]][-1])[
+        "reply_markup"]["inline_keyboard"]
+    assert len(kb) == 4 and kb[3][0]["callback_data"] == "d"
+
+
 def test_verify():
     ch = _ch()
     assert ch.verify(headers={"x-telegram-bot-api-secret-token": "sek"}, body=b"") is True

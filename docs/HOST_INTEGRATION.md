@@ -76,6 +76,19 @@ Buttons render natively per channel — Telegram inline keyboard, WhatsApp Cloud
 interactive buttons, Evolution `sendButtons`. The user's tap comes back as an
 `INTERACTIVE` inbound carrying `selection.id` (`"confirm"` / `"cancel"`).
 
+**More than 3 options?** Quick-reply buttons cap at 3 on WhatsApp; use a **list
+menu** (up to ~10 rows). Same tap-back contract (`INTERACTIVE` + `selection.id`):
+
+```python
+from cogno_gateway import ListMenu, ListSection, Button
+await channel.send(msg.sender, OutboundMessage(text="Escolha um serviço:",
+    list_menu=ListMenu(button="Ver serviços", sections=[ListSection("Serviços", [
+        Button("corte", "Corte"), Button("barba", "Barba"),
+        Button("mani", "Manicure"), Button("massa", "Massagem")])])))
+```
+
+→ a WhatsApp list message / a Telegram inline keyboard (one row per option).
+
 `send` chunks long text (`split_message`, default 600 chars / 6 chunks — override
 via `ChannelConfig.max_chars`) and returns a `SendResult(ok, message_ids, error)`.
 A transport failure is returned (`ok=False`), not raised, so the host decides.

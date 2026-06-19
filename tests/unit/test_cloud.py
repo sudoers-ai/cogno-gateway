@@ -84,6 +84,20 @@ async def test_send_buttons_interactive(fake_httpx):
     assert b["interactive"]["action"]["buttons"][0]["reply"] == {"id": "yes", "title": "Sim"}
 
 
+async def test_send_list_menu_over_3_options(fake_httpx):
+    from cogno_gateway import Button, ListMenu, ListSection
+    fake_httpx.routes = {"/messages": FakeResponse({"messages": [{"id": "L1"}]})}
+    menu = ListMenu(button="Ver serviços", sections=[ListSection("Serviços", [
+        Button("corte", "Corte"), Button("barba", "Barba"),
+        Button("mani", "Manicure"), Button("massa", "Massagem")])])
+    await _ch().send("5511", OutboundMessage(text="Escolha:", list_menu=menu))
+    b = body_of([c for c in fake_httpx.calls if "/messages" in c["url"]][0])
+    assert b["interactive"]["type"] == "list"
+    assert b["interactive"]["action"]["button"] == "Ver serviços"
+    rows = b["interactive"]["action"]["sections"][0]["rows"]
+    assert len(rows) == 4 and rows[0] == {"id": "corte", "title": "Corte"}
+
+
 def test_statuses_event_ignored():
     assert _ch().parse_inbound({"entry": [{"changes": [{"value": {"statuses": [{}]}}]}]}) is None
     assert _ch().parse_inbound({"object": "x"}) is None

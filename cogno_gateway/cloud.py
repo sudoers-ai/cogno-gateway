@@ -156,7 +156,15 @@ class WhatsAppCloudChannel:
                         "messaging_product": "whatsapp", "to": recipient, "type": "reaction",
                         "reaction": {"message_id": message.reaction.target_message_id,
                                      "emoji": message.reaction.emoji}})
-                if message.buttons:
+                if message.list_menu is not None:
+                    ids.append(await self._post(client, url, {
+                        "messaging_product": "whatsapp", "to": recipient, "type": "interactive",
+                        "interactive": {"type": "list", "body": {"text": message.text or " "},
+                                        "action": {"button": message.list_menu.button, "sections": [
+                                            {"title": s.title,
+                                             "rows": [{"id": r.id, "title": r.title} for r in s.rows]}
+                                            for s in message.list_menu.sections]}}}))
+                elif message.buttons:
                     ids.append(await self._post(client, url, {
                         "messaging_product": "whatsapp", "to": recipient, "type": "interactive",
                         "interactive": {"type": "button", "body": {"text": message.text or " "},

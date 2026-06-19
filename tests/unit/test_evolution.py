@@ -85,6 +85,18 @@ async def test_send_buttons(fake_httpx):
     assert b["buttons"][0] == {"type": "reply", "displayText": "Sim", "id": "yes"}
 
 
+async def test_send_list(fake_httpx):
+    from cogno_gateway import Button, ListMenu, ListSection
+    fake_httpx.routes = {"sendList": FakeResponse({"key": {"id": "L1"}})}
+    menu = ListMenu(button="Menu", sections=[ListSection("Serviços", [
+        Button("corte", "Corte"), Button("barba", "Barba"),
+        Button("mani", "Manicure"), Button("massa", "Massagem")])])
+    await _ch().send("5511@s.whatsapp.net", OutboundMessage(text="Escolha:", list_menu=menu))
+    b = body_of([c for c in fake_httpx.calls if "sendList" in c["url"]][0])
+    assert b["buttonText"] == "Menu"
+    assert b["sections"][0]["rows"][0] == {"rowId": "corte", "title": "Corte", "description": ""}
+
+
 def test_ignores_from_me_groups_and_non_upsert():
     ch = _ch()
     assert ch.parse_inbound(_upsert(key={"remoteJid": "x", "fromMe": True})) is None

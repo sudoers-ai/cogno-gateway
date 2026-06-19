@@ -68,6 +68,25 @@ class ButtonReply:
 
 
 @dataclass
+class ListSection:
+    """A titled group of options inside a list menu (rows reuse ``Button``)."""
+
+    title: str
+    rows: list["Button"] = field(default_factory=list)
+
+
+@dataclass
+class ListMenu:
+    """A list/menu of options (outbound) — for >3 choices, where quick-reply
+    buttons don't fit (WhatsApp caps buttons at 3; a list holds up to ~10). The
+    body text comes from ``OutboundMessage.text``; ``button`` is the label that
+    opens the menu."""
+
+    button: str = "Opções"
+    sections: list[ListSection] = field(default_factory=list)
+
+
+@dataclass
 class Location:
     latitude: float
     longitude: float
@@ -112,7 +131,8 @@ class OutboundMessage:
     audio_format: str = "opus"
     media: list[MediaRef] = field(default_factory=list)
     reaction: Optional[Reaction] = None
-    buttons: list["Button"] = field(default_factory=list)   # quick-replies under the text
+    buttons: list["Button"] = field(default_factory=list)   # quick-replies (≤3) under the text
+    list_menu: Optional["ListMenu"] = None  # a menu of >3 options (WhatsApp list / TG keyboard)
     template: Optional["Template"] = None   # proactive send outside the 24h window
 
 

@@ -138,7 +138,20 @@ class EvolutionChannel:
                         json={"key": {"remoteJid": recipient, "fromMe": False,
                                       "id": message.reaction.target_message_id},
                               "reaction": message.reaction.emoji})
-                if message.buttons:
+                if message.list_menu is not None:
+                    resp = await client.post(
+                        f"{self._base}/message/sendList/{self._instance}",
+                        headers=self._headers(),
+                        json={"number": number, "title": "", "description": message.text or " ",
+                              "buttonText": message.list_menu.button,
+                              "sections": [
+                                  {"title": s.title,
+                                   "rows": [{"rowId": r.id, "title": r.title, "description": ""}
+                                            for r in s.rows]}
+                                  for s in message.list_menu.sections]})
+                    resp.raise_for_status()
+                    ids.append(str(resp.json().get("key", {}).get("id", "")))
+                elif message.buttons:
                     resp = await client.post(
                         f"{self._base}/message/sendButtons/{self._instance}",
                         headers=self._headers(),
