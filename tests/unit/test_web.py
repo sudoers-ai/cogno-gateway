@@ -44,3 +44,26 @@ def test_verify_with_secret():
     assert ch.verify(headers={"x-webchat-secret": "shh"}, body=b"") is True
     assert ch.verify(headers={"x-webchat-secret": "nope"}, body=b"") is False
     assert WebChannel().verify(headers={}, body=b"") is True   # open without secret
+
+
+def test_serialize_rich_reply():
+    from cogno_gateway import MediaRef, Reaction
+    out = WebChannel().serialize("s1", OutboundMessage(
+        text="oi", audio=b"x", audio_format="opus",
+        media=[MediaRef(url="http://x/y.png", mime="image/png", caption="c")],
+        reaction=Reaction("👍", "m1")))
+    assert out["media"][0] == {"url": "http://x/y.png", "mime": "image/png", "caption": "c"}
+    assert out["audio_format"] == "opus"
+    assert out["reaction"] == {"emoji": "👍", "target_message_id": "m1"}
+
+
+async def test_send_is_noop_ok():
+    res = await WebChannel().send("s1", OutboundMessage(text="oi"))
+    assert res.ok is True
+
+
+async def test_fetch_media_not_supported():
+    import pytest
+    from cogno_gateway import MediaRef
+    with pytest.raises(NotImplementedError):
+        await WebChannel().fetch_media(MediaRef(ref="x"))
