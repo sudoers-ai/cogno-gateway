@@ -28,3 +28,5 @@ jobs:
       - name: Unit tests
         # Provider API calls are mocked (fake httpx); no network needed.
         run: pytest tests/unit -q --cov=cogno_gateway --cov-report=term-missing --cov-fail-under=85
+      - name: Integration tests (real httpx via MockTransport, no network)
+        run: pytest tests/integration -q
