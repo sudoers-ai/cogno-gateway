@@ -34,6 +34,23 @@ _API = "https://api.telegram.org"
 _SECRET_HEADER = "x-telegram-bot-api-secret-token"
 
 
+def _error_detail(exc: "httpx.HTTPError") -> str:
+    """The Telegram-reported reason for a failed send, not the opaque httpx status. On a 4xx,
+    ``raise_for_status`` raises ``HTTPStatusError`` whose ``response`` body carries Telegram's
+    ``{"ok": false, "description": "..."}`` (e.g. "chat not found", "can't parse entities …") —
+    surface that so a failure is diagnosable. Falls back to ``str(exc)`` for transport errors."""
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        try:
+            desc = resp.json().get("description")
+        except Exception:  # noqa: BLE001 — non-JSON body → use raw text
+            desc = None
+        detail = desc or (resp.text or "").strip()
+        if detail:
+            return f"{resp.status_code} {detail}"
+    return str(exc)
+
+
 class TelegramChannel:
     name = "telegram"
 
@@ -177,7 +194,9 @@ class TelegramChannel:
                     await client.post(f"{_API}/bot{self._token}/sendDocument",
                                       json={"chat_id": recipient, "document": m.url or m.ref})
             except httpx.HTTPError as exc:
-                logger.warning("channel=telegram event=send_failed sent=%d error=%s", len(ids), exc)
-                return SendResult(ok=False, message_ids=ids, error=str(exc))
+                detail = _error_detail(exc)
+                logger.warning("channel=telegram event=send_failed sent=%d error=%s", len(ids),
+                               detail)
+                return SendResult(ok=False, message_ids=ids, error=detail)
         logger.debug("channel=telegram event=message_sent chunks=%d ok=true", len(ids))
         return SendResult(ok=True, message_ids=ids)

@@ -15,10 +15,16 @@ class FakeResponse:
     def json(self):
         return self._payload
 
+    @property
+    def text(self):
+        return self.content.decode() if self.content else ""
+
     def raise_for_status(self):
         if self.status_code >= 400:
             import httpx
-            raise httpx.HTTPError(f"HTTP {self.status_code}")
+            err = httpx.HTTPError(f"HTTP {self.status_code}")
+            err.response = self   # mirror httpx.HTTPStatusError so error detail can be surfaced
+            raise err
 
 
 class FakeAsyncClient:
