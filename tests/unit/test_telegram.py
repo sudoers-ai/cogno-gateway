@@ -134,6 +134,16 @@ async def test_send_returns_error_on_http_failure(fake_httpx):
     assert res.ok is False and "500" in res.error
 
 
+@pytest.mark.asyncio
+async def test_send_surfaces_telegram_error_description(fake_httpx):
+    # a 4xx carries Telegram's reason in the body — surface it (not the opaque httpx status), so
+    # "chat not found" / "can't parse entities" is diagnosable instead of a bare "400".
+    fake_httpx.routes = {"sendMessage": FakeResponse(
+        {"ok": False, "description": "Bad Request: chat not found"}, status=400)}
+    res = await _ch().send("42", OutboundMessage(text="hi"))
+    assert res.ok is False and "chat not found" in res.error and "400" in res.error
+
+
 async def test_fetch_media(fake_httpx):
     fake_httpx.routes = {
         "getFile": FakeResponse({"result": {"file_path": "voice/f.ogg"}}),
