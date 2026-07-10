@@ -158,11 +158,12 @@ class TelegramChannel:
         async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
             try:
                 if message.reaction:
-                    await client.post(
+                    resp = await client.post(
                         f"{_API}/bot{self._token}/setMessageReaction",
                         json={"chat_id": recipient,
                               "message_id": int(message.reaction.target_message_id or 0),
                               "reaction": [{"type": "emoji", "emoji": message.reaction.emoji}]})
+                    resp.raise_for_status()
                 chunks = split_message(message.text, max_chars=max_chars)
                 markup = None
                 # Telegram has no native list UI — render buttons and list rows alike
@@ -191,8 +192,10 @@ class TelegramChannel:
                     resp.raise_for_status()
                     ids.append(str(resp.json().get("result", {}).get("message_id", "")))
                 for m in message.media:
-                    await client.post(f"{_API}/bot{self._token}/sendDocument",
-                                      json={"chat_id": recipient, "document": m.url or m.ref})
+                    resp = await client.post(f"{_API}/bot{self._token}/sendDocument",
+                                             json={"chat_id": recipient, "document": m.url or m.ref})
+                    resp.raise_for_status()
+                    ids.append(str(resp.json().get("result", {}).get("message_id", "")))
             except httpx.HTTPError as exc:
                 detail = _error_detail(exc)
                 logger.warning("channel=telegram event=send_failed sent=%d error=%s", len(ids),

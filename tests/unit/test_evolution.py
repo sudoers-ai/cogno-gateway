@@ -145,3 +145,25 @@ async def test_fetch_media_decodes_base64(fake_httpx):
         {"base64": base64.b64encode(b"IMG").decode()})}
     data = await _ch().fetch_media(MediaRef(ref="M4"))
     assert data == b"IMG"
+
+
+async def test_send_reaction_failure_is_reported(fake_httpx):
+    from cogno_gateway import Reaction
+    fake_httpx.routes = {"/sendReaction/": FakeResponse(status=500)}
+    res = await _ch().send("5511@s.whatsapp.net",
+                           OutboundMessage(reaction=Reaction("👍", "MSG1")))
+    assert res.ok is False and "500" in res.error
+
+
+async def test_send_media_failure_is_reported(fake_httpx):
+    fake_httpx.routes = {"/sendMedia/": FakeResponse(status=500)}
+    res = await _ch().send("5511@s.whatsapp.net",
+                           OutboundMessage(media=[MediaRef(url="http://x/f.pdf")]))
+    assert res.ok is False and "500" in res.error
+
+
+async def test_send_media_success_appends_id(fake_httpx):
+    fake_httpx.routes = {"/sendMedia/": FakeResponse({"key": {"id": "DOC1"}})}
+    res = await _ch().send("5511@s.whatsapp.net",
+                           OutboundMessage(media=[MediaRef(url="http://x/f.pdf")]))
+    assert res.ok is True and "DOC1" in res.message_ids

@@ -68,7 +68,7 @@ async def test_cloud_send_text_serializes_real_request(mock_http):
     assert res.ok is True and res.message_ids == ["wamid.X"]
     req = rec.requests[0]
     assert req.method == "POST"
-    assert req.url.path == "/v21.0/PHONE_ID/messages"
+    assert req.url.path == "/v25.0/PHONE_ID/messages"
     assert req.headers["authorization"] == "Bearer ACCESS"
     # the body really went through httpx JSON serialization (UTF-8 preserved)
     assert json.loads(req.content) == {
@@ -94,7 +94,7 @@ async def test_cloud_fetch_media_two_step_round_trip(mock_http):
     data = await WhatsAppCloudChannel(CLOUD_CFG).fetch_media(MediaRef(ref="MEDIA_ID"))
 
     assert data == b"JPEGBYTES"
-    assert rec.requests[0].url.path == "/v21.0/MEDIA_ID"
+    assert rec.requests[0].url.path == "/v25.0/MEDIA_ID"
     # the bearer token travels to the (off-Graph) media URL too
     assert rec.requests[1].headers["authorization"] == "Bearer ACCESS"
 

@@ -110,6 +110,12 @@ class InboundMessage:
 
     channel: str                       # "telegram" | "whatsapp" | "web"
     sender: str                        # chat id / remoteJid / web session id
+    sender_user_id: str = ""           # provider stable user id when distinct from sender —
+    #                                    WhatsApp Cloud BSUID (business-scoped user id): with the
+    #                                    2026 usernames rollout a user may hide their phone, so
+    #                                    `from`/`wa_id` become conditional and this is the stable
+    #                                    identity key (sender falls back to it when the phone is
+    #                                    absent). Empty on channels without the concept.
     kind: MessageKind = MessageKind.TEXT
     message_id: str = ""
     text: str = ""

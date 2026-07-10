@@ -176,3 +176,66 @@ async def test_fetch_media(fake_httpx):
 def test_factory_aliases():
     for kind in ("whatsapp_cloud", "cloud", "meta"):
         assert isinstance(create_channel(kind, CFG), WhatsAppCloudChannel)
+
+
+# ── BSUID / usernames (2026) ──────────────────────────────────────────
+
+
+def _evt_with_contacts(message: dict, contacts: list) -> dict:
+    return {"entry": [{"changes": [{"value": {"messages": [message],
+                                              "contacts": contacts}}]}]}
+
+
+def test_parse_bsuid_alongside_phone():
+    msg = _ch().parse_inbound(_evt_with_contacts(
+        {"from": "5511", "id": "w1", "type": "text", "text": {"body": "oi"},
+         "from_user_id": "BSUID_1"},
+        [{"wa_id": "5511", "user_id": "BSUID_1"}]))
+    assert msg.sender == "5511" and msg.sender_user_id == "BSUID_1"
+
+
+def test_parse_username_user_without_phone_falls_back_to_bsuid():
+    # A username user hid the phone: no `from`/`wa_id` — the BSUID keys the message.
+    msg = _ch().parse_inbound(_evt_with_contacts(
+        {"id": "w2", "type": "text", "text": {"body": "oi"}, "from_user_id": "BSUID_2"},
+        [{"user_id": "BSUID_2"}]))
+    assert msg.sender == "BSUID_2" and msg.sender_user_id == "BSUID_2"
+
+
+def test_parse_bsuid_from_contacts_only():
+    msg = _ch().parse_inbound(_evt_with_contacts(
+        {"from": "5511", "id": "w3", "type": "text", "text": {"body": "oi"}},
+        [{"wa_id": "5511", "user_id": "BSUID_3"}]))
+    assert msg.sender == "5511" and msg.sender_user_id == "BSUID_3"
+
+
+def test_parse_without_bsuid_keeps_empty_user_id():
+    msg = _ch().parse_inbound(_evt({"from": "5511", "id": "w4", "type": "text",
+                                    "text": {"body": "oi"}}))
+    assert msg.sender == "5511" and msg.sender_user_id == ""
+
+
+# ── Graph API version ─────────────────────────────────────────────────
+
+
+async def test_default_graph_version_v25(fake_httpx):
+    fake_httpx.routes = {"/messages": FakeResponse({"messages": [{"id": "1"}]})}
+    await _ch().send("5511", OutboundMessage(text="oi"))
+    assert fake_httpx.calls[0]["url"].startswith("https://graph.facebook.com/v25.0/")
+
+
+async def test_graph_version_from_extra(fake_httpx):
+    fake_httpx.routes = {"/messages": FakeResponse({"messages": [{"id": "1"}]})}
+    ch = WhatsAppCloudChannel(ChannelConfig(token="T", instance="P",
+                                            extra={"graph_version": "v23.0"}))
+    await ch.send("5511", OutboundMessage(text="oi"))
+    assert fake_httpx.calls[0]["url"].startswith("https://graph.facebook.com/v23.0/")
+
+
+async def test_base_url_wins_over_graph_version(fake_httpx):
+    fake_httpx.routes = {"/messages": FakeResponse({"messages": [{"id": "1"}]})}
+    ch = WhatsAppCloudChannel(ChannelConfig(token="T", instance="P",
+                                            base_url="https://graph.example/vX",
+                                            extra={"graph_version": "v23.0"}))
+    await ch.send("5511", OutboundMessage(text="oi"))
+    assert fake_httpx.calls[0]["url"].startswith("https://graph.example/vX/")
