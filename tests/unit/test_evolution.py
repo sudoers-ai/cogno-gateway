@@ -167,3 +167,14 @@ async def test_send_media_success_appends_id(fake_httpx):
     res = await _ch().send("5511@s.whatsapp.net",
                            OutboundMessage(media=[MediaRef(url="http://x/f.pdf")]))
     assert res.ok is True and "DOC1" in res.message_ids
+
+
+async def test_send_to_lid_recipient_keeps_full_jid(fake_httpx):
+    # A @lid (hidden-phone) sender: the bare digits don't route — the full JID must go out.
+    fake_httpx.routes = {"/sendText/": FakeResponse({"key": {"id": "L1"}})}
+    await _ch().send("123456789@lid", OutboundMessage(text="oi"))
+    assert body_of(fake_httpx.calls[0])["number"] == "123456789@lid"
+    # control: a phone JID still goes as the plain number
+    fake_httpx.calls.clear()
+    await _ch().send("5511988887777@s.whatsapp.net", OutboundMessage(text="oi"))
+    assert body_of(fake_httpx.calls[0])["number"] == "5511988887777"

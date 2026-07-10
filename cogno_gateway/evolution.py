@@ -136,7 +136,9 @@ class EvolutionChannel:
     # ── send ──────────────────────────────────────────────────────────
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
         ids: list[str] = []
-        number = recipient.split("@", 1)[0]
+        # A hidden-phone sender arrives as `<digits>@lid` (not `@s.whatsapp.net`) — the bare
+        # digits are NOT a phone number and don't route, so keep the full JID for those.
+        number = recipient if recipient.endswith("@lid") else recipient.split("@", 1)[0]
         max_chars = self._cfg.max_chars or 600
         async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
             try:
