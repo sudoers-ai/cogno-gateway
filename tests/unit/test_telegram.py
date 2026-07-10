@@ -152,3 +152,16 @@ async def test_fetch_media(fake_httpx):
     from cogno_gateway import MediaRef
     data = await _ch().fetch_media(MediaRef(ref="FID"))
     assert data == b"AUDIOBYTES"
+
+
+async def test_send_reaction_failure_is_reported(fake_httpx):
+    fake_httpx.routes = {"/setMessageReaction": FakeResponse(status=400)}
+    res = await _ch().send("42", OutboundMessage(reaction=Reaction("👍", "7")))
+    assert res.ok is False and "400" in res.error
+
+
+async def test_send_document_failure_is_reported(fake_httpx):
+    from cogno_gateway import MediaRef
+    fake_httpx.routes = {"/sendDocument": FakeResponse(status=400)}
+    res = await _ch().send("42", OutboundMessage(media=[MediaRef(url="http://x/f.pdf")]))
+    assert res.ok is False and "400" in res.error

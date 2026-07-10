@@ -136,17 +136,20 @@ class EvolutionChannel:
     # ── send ──────────────────────────────────────────────────────────
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
         ids: list[str] = []
-        number = recipient.split("@", 1)[0]
+        # A hidden-phone sender arrives as `<digits>@lid` (not `@s.whatsapp.net`) — the bare
+        # digits are NOT a phone number and don't route, so keep the full JID for those.
+        number = recipient if recipient.endswith("@lid") else recipient.split("@", 1)[0]
         max_chars = self._cfg.max_chars or 600
         async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
             try:
                 if message.reaction:
-                    await client.post(
+                    resp = await client.post(
                         f"{self._base}/message/sendReaction/{self._instance}",
                         headers=self._headers(),
                         json={"key": {"remoteJid": recipient, "fromMe": False,
                                       "id": message.reaction.target_message_id},
                               "reaction": message.reaction.emoji})
+                    resp.raise_for_status()
                 if message.list_menu is not None:
                     resp = await client.post(
                         f"{self._base}/message/sendList/{self._instance}",
@@ -184,11 +187,13 @@ class EvolutionChannel:
                     resp.raise_for_status()
                     ids.append(str(resp.json().get("key", {}).get("id", "")))
                 for m in message.media:
-                    await client.post(
+                    resp = await client.post(
                         f"{self._base}/message/sendMedia/{self._instance}",
                         headers=self._headers(),
                         json={"number": number, "media": m.url or m.ref,
                               "mediatype": "document", "caption": m.caption})
+                    resp.raise_for_status()
+                    ids.append(str(resp.json().get("key", {}).get("id", "")))
             except httpx.HTTPError as exc:
                 logger.warning("channel=whatsapp event=send_failed sent=%d error=%s", len(ids), exc)
                 return SendResult(ok=False, message_ids=ids, error=str(exc))

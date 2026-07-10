@@ -145,3 +145,36 @@ async def test_fetch_media_decodes_base64(fake_httpx):
         {"base64": base64.b64encode(b"IMG").decode()})}
     data = await _ch().fetch_media(MediaRef(ref="M4"))
     assert data == b"IMG"
+
+
+async def test_send_reaction_failure_is_reported(fake_httpx):
+    from cogno_gateway import Reaction
+    fake_httpx.routes = {"/sendReaction/": FakeResponse(status=500)}
+    res = await _ch().send("5511@s.whatsapp.net",
+                           OutboundMessage(reaction=Reaction("👍", "MSG1")))
+    assert res.ok is False and "500" in res.error
+
+
+async def test_send_media_failure_is_reported(fake_httpx):
+    fake_httpx.routes = {"/sendMedia/": FakeResponse(status=500)}
+    res = await _ch().send("5511@s.whatsapp.net",
+                           OutboundMessage(media=[MediaRef(url="http://x/f.pdf")]))
+    assert res.ok is False and "500" in res.error
+
+
+async def test_send_media_success_appends_id(fake_httpx):
+    fake_httpx.routes = {"/sendMedia/": FakeResponse({"key": {"id": "DOC1"}})}
+    res = await _ch().send("5511@s.whatsapp.net",
+                           OutboundMessage(media=[MediaRef(url="http://x/f.pdf")]))
+    assert res.ok is True and "DOC1" in res.message_ids
+
+
+async def test_send_to_lid_recipient_keeps_full_jid(fake_httpx):
+    # A @lid (hidden-phone) sender: the bare digits don't route — the full JID must go out.
+    fake_httpx.routes = {"/sendText/": FakeResponse({"key": {"id": "L1"}})}
+    await _ch().send("123456789@lid", OutboundMessage(text="oi"))
+    assert body_of(fake_httpx.calls[0])["number"] == "123456789@lid"
+    # control: a phone JID still goes as the plain number
+    fake_httpx.calls.clear()
+    await _ch().send("5511988887777@s.whatsapp.net", OutboundMessage(text="oi"))
+    assert body_of(fake_httpx.calls[0])["number"] == "5511988887777"

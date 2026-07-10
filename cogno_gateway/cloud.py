@@ -13,8 +13,16 @@ adapter supports both sends.
 
 ``ChannelConfig``: ``token`` = access token (Bearer), ``instance`` = phone number
 id, ``secret`` = app secret (for the ``X-Hub-Signature-256`` HMAC),
-``base_url`` = Graph base (default ``https://graph.facebook.com/v21.0``),
+``base_url`` = full Graph base override, ``extra["graph_version"]`` = Graph API
+version (default ``v25.0``; ``base_url`` wins when both are set),
 ``extra["verify_token"]`` = the GET-subscription verify token.
+
+BSUID / usernames (2026): message webhooks carry a business-scoped user id
+(``messages[].from_user_id`` / ``contacts[].user_id``) and, once a user adopts a
+WhatsApp username and hides their phone, ``messages[].from`` becomes conditional.
+``parse_inbound`` surfaces the BSUID as ``InboundMessage.sender_user_id`` and
+falls back to it for ``sender`` when the phone is absent — hosts should key
+identity on the BSUID and treat the phone as enrichment.
 """
 
 from __future__ import annotations
@@ -42,7 +50,8 @@ from cogno_gateway.types import (
 
 logger = logging.getLogger("cogno_gateway.cloud")
 
-_DEFAULT_BASE = "https://graph.facebook.com/v21.0"
+_DEFAULT_GRAPH_VERSION = "v25.0"
+_GRAPH_HOST = "https://graph.facebook.com"
 _TYPE_KINDS = {
     "image": MessageKind.IMAGE,
     "audio": MessageKind.AUDIO,
@@ -61,7 +70,8 @@ class WhatsAppCloudChannel:
                 "WhatsAppCloudChannel requires config.token (access token) and "
                 "config.instance (phone number id)")
         self._cfg = config
-        self._base = (config.base_url or _DEFAULT_BASE).rstrip("/")
+        version = str(config.extra.get("graph_version", "") or _DEFAULT_GRAPH_VERSION)
+        self._base = (config.base_url or f"{_GRAPH_HOST}/{version}").rstrip("/")
         self._phone_id = config.instance
         if not config.secret:
             logger.warning("channel=whatsapp_cloud event=verify_open reason=no_secret_configured")
@@ -96,15 +106,20 @@ class WhatsAppCloudChannel:
             message = value["messages"][0]
         except (KeyError, IndexError, TypeError):
             return None  # statuses / non-message events
-        sender = str(message.get("from", ""))
+        # BSUID (business-scoped user id): the stable identity key once usernames land.
+        # `from` (the phone) is conditional for username users — fall back to the BSUID.
+        contacts = value.get("contacts") or []
+        contact = contacts[0] if contacts and isinstance(contacts[0], dict) else {}
+        user_id = str(message.get("from_user_id", "") or contact.get("user_id", "") or "")
+        sender = str(message.get("from", "") or user_id)
         message_id = str(message.get("id", ""))
         mtype = message.get("type", "")
 
         def mk(kind: MessageKind, *, text: str = "", media: Optional[MediaRef] = None,
                reaction: Optional[Reaction] = None, location: Optional[Location] = None,
                selection: Optional[ButtonReply] = None) -> InboundMessage:
-            return InboundMessage(channel=self.name, sender=sender, kind=kind,
-                                  message_id=message_id, text=text, media=media,
+            return InboundMessage(channel=self.name, sender=sender, sender_user_id=user_id,
+                                  kind=kind, message_id=message_id, text=text, media=media,
                                   reaction=reaction, location=location, selection=selection,
                                   raw=message)
 
