@@ -86,7 +86,9 @@ class WhatsAppCloudChannel:
             return True
         sig = headers.get("x-hub-signature-256") or headers.get("X-Hub-Signature-256") or ""
         expected = "sha256=" + hmac.new(self._cfg.secret.encode(), body, hashlib.sha256).hexdigest()
-        ok = hmac.compare_digest(sig, expected)
+        # Compare as bytes: hmac.compare_digest on str operands raises TypeError if either is
+        # non-ASCII, so a crafted signature header would crash verify() instead of returning False.
+        ok = hmac.compare_digest(sig.encode("utf-8", "ignore"), expected.encode("ascii"))
         if not ok:
             logger.warning("channel=whatsapp_cloud event=verify_failed reason=hmac_mismatch")
         return ok
@@ -101,11 +103,28 @@ class WhatsAppCloudChannel:
 
     # ── parse inbound (Graph API webhook) ─────────────────────────────
     def parse_inbound(self, payload: dict) -> Optional[InboundMessage]:
-        try:
-            value = payload["entry"][0]["changes"][0]["value"]
-            message = value["messages"][0]
-        except (KeyError, IndexError, TypeError):
-            return None  # statuses / non-message events
+        """The FIRST inbound message (back-compat). Prefer ``parse_batch`` — Meta batches
+        multiple messages into one delivery under load, and this drops all but the first."""
+        batch = self.parse_batch(payload)
+        return batch[0] if batch else None
+
+    def parse_batch(self, payload: dict) -> list[InboundMessage]:
+        """ALL inbound messages in a Graph webhook delivery. Meta batches several messages
+        (and several entries/changes) into one POST, so returning only the first silently loses
+        the rest. A single malformed message is logged and skipped (never crashes the route —
+        Meta redelivers on any non-200, so an unhandled parse error wedges the webhook)."""
+        out: list[InboundMessage] = []
+        for entry in payload.get("entry") or []:
+            for change in (entry or {}).get("changes") or []:
+                value = (change or {}).get("value") or {}
+                for message in value.get("messages") or []:
+                    try:
+                        out.append(self._parse_message(message or {}, value))
+                    except Exception:  # noqa: BLE001 — one bad message must not drop the batch
+                        logger.warning("channel=whatsapp_cloud event=parse_message_failed")
+        return out
+
+    def _parse_message(self, message: dict, value: dict) -> InboundMessage:
         # BSUID (business-scoped user id): the stable identity key once usernames land.
         # `from` (the phone) is conditional for username users — fall back to the BSUID.
         contacts = value.get("contacts") or []
@@ -123,30 +142,34 @@ class WhatsAppCloudChannel:
                                   reaction=reaction, location=location, selection=selection,
                                   raw=message)
 
+        # Every nested field uses ``... or {}`` (not ``.get(k, {})``): Meta sends a present-but-null
+        # field as JSON null → ``.get`` returns None, and ``None.get(...)`` would raise.
         if mtype == "text":
-            return mk(MessageKind.TEXT, text=message.get("text", {}).get("body", ""))
+            return mk(MessageKind.TEXT, text=(message.get("text") or {}).get("body", ""))
         if mtype == "interactive":
-            inter = message.get("interactive", {})
+            inter = message.get("interactive") or {}
             sel = inter.get(inter.get("type", ""), {}) or {}
             return mk(MessageKind.INTERACTIVE, text=sel.get("title", ""),
                       selection=ButtonReply(id=str(sel.get("id", "")), title=sel.get("title", "")))
         if mtype == "button":   # template quick-reply button
-            b = message.get("button", {})
+            b = message.get("button") or {}
             return mk(MessageKind.INTERACTIVE, text=b.get("text", ""),
                       selection=ButtonReply(id=str(b.get("payload", "")), title=b.get("text", "")))
         if mtype == "reaction":
-            r = message.get("reaction", {})
+            r = message.get("reaction") or {}
             return mk(MessageKind.REACTION,
                       reaction=Reaction(emoji=r.get("emoji", ""),
                                         target_message_id=str(r.get("message_id", ""))))
         if mtype == "location":
-            loc = message.get("location", {})
+            loc = message.get("location") or {}
+            try:
+                lat, lon = float(loc.get("latitude") or 0.0), float(loc.get("longitude") or 0.0)
+            except (TypeError, ValueError):
+                lat, lon = 0.0, 0.0
             return mk(MessageKind.LOCATION,
-                      location=Location(latitude=float(loc.get("latitude", 0.0)),
-                                        longitude=float(loc.get("longitude", 0.0)),
-                                        name=loc.get("name", "")))
+                      location=Location(latitude=lat, longitude=lon, name=loc.get("name", "")))
         if mtype in _TYPE_KINDS:
-            sub = message.get(mtype, {}) or {}
+            sub = message.get(mtype) or {}
             return mk(_TYPE_KINDS[mtype], text=sub.get("caption", ""),
                       media=MediaRef(ref=str(sub.get("id", "")), mime=sub.get("mime_type", ""),
                                      filename=sub.get("filename", "")))
