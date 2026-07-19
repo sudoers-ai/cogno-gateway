@@ -239,3 +239,49 @@ async def test_base_url_wins_over_graph_version(fake_httpx):
                                             extra={"graph_version": "v23.0"}))
     await ch.send("5511", OutboundMessage(text="oi"))
     assert fake_httpx.calls[0]["url"].startswith("https://graph.example/vX/")
+
+
+def test_parse_batch_returns_all_messages():
+    # Meta batches several messages into one delivery; parse_batch must not lose any.
+    payload = {"entry": [{"changes": [{"value": {"messages": [
+        {"from": "5511", "id": "m1", "type": "text", "text": {"body": "one"}},
+        {"from": "5511", "id": "m2", "type": "text", "text": {"body": "two"}},
+        {"from": "5511", "id": "m3", "type": "text", "text": {"body": "three"}},
+    ]}}]}]}
+    batch = _ch().parse_batch(payload)
+    assert [m.message_id for m in batch] == ["m1", "m2", "m3"]
+    assert _ch().parse_inbound(payload).message_id == "m1"   # back-compat: first only
+
+
+def test_parse_batch_spans_multiple_entries_and_changes():
+    payload = {"entry": [
+        {"changes": [{"value": {"messages": [{"from": "a", "id": "e1", "type": "text",
+                                              "text": {"body": "x"}}]}}]},
+        {"changes": [{"value": {"messages": [{"from": "b", "id": "e2", "type": "text",
+                                              "text": {"body": "y"}}]}}]},
+    ]}
+    assert [m.message_id for m in _ch().parse_batch(payload)] == ["e1", "e2"]
+
+
+def test_malformed_message_is_skipped_not_crashing():
+    # a present-but-null text field and a non-numeric latitude must NOT crash the route
+    # (Meta redelivers on non-200 → an unhandled parse error wedges the webhook).
+    payload = {"entry": [{"changes": [{"value": {"messages": [
+        {"from": "a", "id": "good", "type": "text", "text": {"body": "ok"}},
+        {"from": "a", "id": "nulltext", "type": "text", "text": None},
+        {"from": "a", "id": "badloc", "type": "location",
+         "location": {"latitude": "NaNsense", "longitude": "x"}},
+    ]}}]}]}
+    batch = _ch().parse_batch(payload)
+    ids = [m.message_id for m in batch]
+    assert "good" in ids            # the good one survives
+    assert "nulltext" in ids        # null text → empty body, not a crash
+    badloc = next(m for m in batch if m.message_id == "badloc")
+    assert badloc.location.latitude == 0.0   # non-numeric coerced, not raised
+
+
+def test_verify_non_ascii_signature_returns_false_not_crash():
+    ch = _ch()
+    body = b'{"hello":"world"}'
+    # a crafted non-ASCII signature must return False, never TypeError out of verify()
+    assert ch.verify(headers={"x-hub-signature-256": "sha256=café"}, body=body) is False
