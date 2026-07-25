@@ -64,6 +64,23 @@ def test_non_message_payload_ignored():
     assert _ch().parse_inbound({"edited_message": {}}) is None
 
 
+def test_parse_drops_group_messages_and_callbacks():
+    # 1:1 by design (the WhatsApp @g.us mirror): a group/supergroup message must be dropped in
+    # code — BotFather privacy mode is an external toggle, and a delivered @mention would
+    # otherwise run a turn keyed by the GROUP chat id (one shared session for all members).
+    for chat_type in ("group", "supergroup"):
+        assert _ch().parse_inbound({"message": {
+            "chat": {"id": -100123, "type": chat_type}, "message_id": 7,
+            "text": "@bot marca amanhã"}}) is None
+        assert _ch().parse_inbound({"callback_query": {
+            "data": "confirm_yes",
+            "message": {"chat": {"id": -100123, "type": chat_type}, "message_id": 50}}}) is None
+    # a private chat (and the type-less fixtures above) keeps parsing normally
+    ok = _ch().parse_inbound({"message": {
+        "chat": {"id": 42, "type": "private"}, "message_id": 7, "text": "oi"}})
+    assert ok is not None and ok.sender == "42"
+
+
 def test_parse_callback_query():
     msg = _ch().parse_inbound({"callback_query": {
         "data": "confirm_yes", "message": {"chat": {"id": 7}, "message_id": 50}}})
