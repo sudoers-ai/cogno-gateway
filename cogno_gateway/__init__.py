@@ -11,6 +11,15 @@ endpoint and wires parsed messages into cognition (and cogno-vox for audio).
             → reply → [vox TTS] → send
 """
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _dist_version
+
+try:
+    __version__ = _dist_version("cogno-gateway")
+except PackageNotFoundError:  # source tree without an installed dist (e.g. vendored checkout)
+    __version__ = "0.0.0"
+
+
 from cogno_gateway.types import (
     Button,
     ButtonReply,
