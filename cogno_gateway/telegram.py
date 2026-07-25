@@ -85,8 +85,18 @@ class TelegramChannel:
             return None  # edits/etc. — ignored
         return self._parse_message(message)
 
+    @staticmethod
+    def _is_group(chat: dict) -> bool:
+        """Cogno is 1:1 by design (WhatsApp drops ``@g.us`` at parse — this is the Telegram
+        mirror). Without it the only guard is BotFather's privacy mode, an external toggle:
+        a @mention delivered from a group would run a turn keyed by the GROUP chat id — one
+        shared auto-GUEST session/memory for every member. Drop group traffic in code."""
+        return chat.get("type") in ("group", "supergroup")
+
     def _parse_callback(self, callback: dict) -> Optional[InboundMessage]:
         chat = (callback.get("message", {}) or {}).get("chat", {})
+        if self._is_group(chat):
+            return None  # 1:1 only
         data = callback.get("data", "")
         # Telegram echoes only callback_data; the title is not resent.
         return InboundMessage(
@@ -96,7 +106,7 @@ class TelegramChannel:
 
     def _parse_reaction(self, reaction: dict) -> Optional[InboundMessage]:
         chat = reaction.get("chat", {})
-        if chat.get("type") in ("group", "supergroup"):
+        if self._is_group(chat):
             return None  # reactions are 1:1 feedback only
         new = reaction.get("new_reaction", [])
         if not new or new[0].get("type") != "emoji":
@@ -110,6 +120,8 @@ class TelegramChannel:
 
     def _parse_message(self, message: dict) -> Optional[InboundMessage]:
         chat = message.get("chat", {})
+        if self._is_group(chat):
+            return None  # 1:1 only — see _is_group
         sender = str(chat.get("id", ""))
         message_id = str(message.get("message_id", ""))
         reply_to = (message.get("reply_to_message", {}) or {}).get("text", "") or ""
