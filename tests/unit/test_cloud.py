@@ -285,3 +285,14 @@ def test_verify_non_ascii_signature_returns_false_not_crash():
     body = b'{"hello":"world"}'
     # a crafted non-ASCII signature must return False, never TypeError out of verify()
     assert ch.verify(headers={"x-hub-signature-256": "sha256=café"}, body=body) is False
+
+
+# ── require_secret (security audit 2026-08-04) ───────────────────────────────
+def test_verify_open_without_secret_by_default():
+    ch = WhatsAppCloudChannel(ChannelConfig(token="T", instance="123"))
+    assert ch.verify(headers={}, body=b"") is True          # dev/demo unchanged
+
+
+def test_verify_fails_closed_when_secret_required():
+    ch = WhatsAppCloudChannel(ChannelConfig(token="T", instance="123", require_secret=True))
+    assert ch.verify(headers={}, body=b"") is False         # production: forged delivery rejected

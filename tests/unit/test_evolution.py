@@ -178,3 +178,16 @@ async def test_send_to_lid_recipient_keeps_full_jid(fake_httpx):
     fake_httpx.calls.clear()
     await _ch().send("5511988887777@s.whatsapp.net", OutboundMessage(text="oi"))
     assert body_of(fake_httpx.calls[0])["number"] == "5511988887777"
+
+
+# ── require_secret (security audit 2026-08-04) ───────────────────────────────
+def _evo_cfg(**kw):
+    return ChannelConfig(token="K", base_url="https://evo.local", instance="i1", **kw)
+
+
+def test_verify_open_without_secret_by_default():
+    assert EvolutionChannel(_evo_cfg()).verify(headers={}, body=b"") is True
+
+
+def test_verify_fails_closed_when_secret_required():
+    assert EvolutionChannel(_evo_cfg(require_secret=True)).verify(headers={}, body=b"") is False

@@ -95,3 +95,18 @@ async def test_fetch_media_not_supported():
     from cogno_gateway import MediaRef
     with pytest.raises(NotImplementedError):
         await WebChannel().fetch_media(MediaRef(ref="x"))
+
+
+# ── require_secret (security audit 2026-08-04) ───────────────────────────────
+def test_verify_open_without_secret_by_default():
+    assert WebChannel().verify(headers={}, body=b"") is True
+
+
+def test_verify_fails_closed_when_secret_required():
+    assert WebChannel(require_secret=True).verify(headers={}, body=b"") is False
+
+
+def test_configured_secret_still_verifies():
+    ch = WebChannel(secret="s3k", require_secret=True)
+    assert ch.verify(headers={"x-webchat-secret": "s3k"}, body=b"") is True
+    assert ch.verify(headers={"x-webchat-secret": "nope"}, body=b"") is False
