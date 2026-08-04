@@ -151,6 +151,10 @@ class ChannelConfig:
     base_url: str = ""     # evolution instance url (provider API base)
     instance: str = ""     # evolution instance name
     secret: str = ""       # webhook verification secret
+    # When True, verify() FAILS CLOSED if no secret is configured (an inbound webhook is rejected
+    # rather than trusted). Default False keeps the dev/demo behaviour (open with a warning); the
+    # host sets it True in production so a signature-capable channel cannot run unverified.
+    require_secret: bool = False
     max_chars: int = 0     # outbound chunk size (0 → adapter default)
     timeout: float = 15.0
     extra: dict = field(default_factory=dict)

@@ -39,15 +39,20 @@ class WebChannel:
 
     name = "web"
 
-    def __init__(self, *, secret: str = "") -> None:
+    def __init__(self, *, secret: str = "", require_secret: bool = False) -> None:
         self._secret = secret
+        self._require_secret = require_secret
         if not secret:
             logger.warning("channel=web event=verify_open reason=no_secret_configured")
 
     def verify(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         """Optional shared-secret check (e.g. an ``X-Webchat-Secret`` header). With
-        no secret configured it is open (the host's auth/CORS guards the route)."""
+        no secret configured it is open (the host's auth/CORS guards the route) unless
+        ``require_secret`` is set, in which case it fails closed."""
         if not self._secret:
+            if self._require_secret:
+                logger.warning("channel=web event=verify_denied reason=secret_required")
+                return False
             return True
         token = headers.get("x-webchat-secret") or headers.get("X-Webchat-Secret") or ""
         ok = hmac.compare_digest(token.encode(), self._secret.encode())

@@ -83,6 +83,9 @@ class WhatsAppCloudChannel:
     def verify(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         """HMAC-SHA256 check of the request body (``X-Hub-Signature-256``)."""
         if not self._cfg.secret:
+            if self._cfg.require_secret:   # production: no app secret → reject forged deliveries
+                logger.warning("channel=whatsapp_cloud event=verify_denied reason=secret_required")
+                return False
             return True
         sig = headers.get("x-hub-signature-256") or headers.get("X-Hub-Signature-256") or ""
         expected = "sha256=" + hmac.new(self._cfg.secret.encode(), body, hashlib.sha256).hexdigest()

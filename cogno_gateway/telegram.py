@@ -65,7 +65,10 @@ class TelegramChannel:
     # ── verify ────────────────────────────────────────────────────────
     def verify(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         if not self._cfg.secret:
-            return True  # secret token not configured → host guards the route
+            if self._cfg.require_secret:   # production: no secret → reject forged updates
+                logger.warning("channel=telegram event=verify_denied reason=secret_required")
+                return False
+            return True  # dev/demo: secret token not configured → host guards the route
         got = headers.get(_SECRET_HEADER) or headers.get("X-Telegram-Bot-Api-Secret-Token") or ""
         ok = hmac.compare_digest(got.encode(), self._cfg.secret.encode())
         if not ok:

@@ -65,6 +65,9 @@ class EvolutionChannel:
     # ── verify ────────────────────────────────────────────────────────
     def verify(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         if not self._cfg.secret:
+            if self._cfg.require_secret:   # production: no secret → reject forged deliveries
+                logger.warning("channel=whatsapp event=verify_denied reason=secret_required")
+                return False
             return True
         got = headers.get("apikey") or headers.get("authorization") or ""
         ok = hmac.compare_digest(got.encode(), self._cfg.secret.encode())

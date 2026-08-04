@@ -115,6 +115,22 @@ def test_verify():
     assert ch.verify(headers={"x-telegram-bot-api-secret-token": "x"}, body=b"") is False
 
 
+def test_verify_open_without_secret_by_default():
+    # dev/demo default: no secret configured → open (host guards the route), a warning is logged.
+    ch = TelegramChannel(ChannelConfig(token="BOT123"))
+    assert ch.verify(headers={}, body=b"") is True
+
+
+def test_verify_fails_closed_when_secret_required():
+    # Security audit 2026-08-04: production sets require_secret=True, so a secretless channel
+    # rejects a forged inbound instead of trusting the spoofed sender id.
+    ch = TelegramChannel(ChannelConfig(token="BOT123", require_secret=True))
+    assert ch.verify(headers={}, body=b"") is False
+    # with a secret present, require_secret does not change the normal HMAC path
+    ok = TelegramChannel(ChannelConfig(token="BOT123", secret="sek", require_secret=True))
+    assert ok.verify(headers={"x-telegram-bot-api-secret-token": "sek"}, body=b"") is True
+
+
 async def test_send_chunks_text(fake_httpx):
     fake_httpx.routes = {"sendMessage": FakeResponse({"result": {"message_id": 1}})}
     res = await _ch().send("42", OutboundMessage(text="hi"))
