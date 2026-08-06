@@ -191,3 +191,22 @@ def test_verify_open_without_secret_by_default():
 
 def test_verify_fails_closed_when_secret_required():
     assert EvolutionChannel(_evo_cfg(require_secret=True)).verify(headers={}, body=b"") is False
+
+
+def test_verify_rejects_missing_header_when_secret_set():
+    """The forged-delivery case the secret exists for: attacker knows the URL, not the
+    header. No ``apikey``/``authorization`` at all must fail, not just a wrong one."""
+    assert EvolutionChannel(_evo_cfg(secret="sek")).verify(headers={}, body=b"") is False
+
+
+def test_verify_rejects_empty_header_value():
+    """An empty ``apikey`` is what a clobbered webhook record ({"apikey": ""}) delivers on
+    every message — it must compare as wrong, never as "no header, skip the check"."""
+    assert EvolutionChannel(_evo_cfg(secret="sek")).verify(
+        headers={"apikey": ""}, body=b"") is False
+
+
+def test_verify_accepts_authorization_fallback():
+    ch = EvolutionChannel(_evo_cfg(secret="sek"))
+    assert ch.verify(headers={"authorization": "sek"}, body=b"") is True
+    assert ch.verify(headers={"authorization": "wrong"}, body=b"") is False
