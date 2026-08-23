@@ -113,6 +113,81 @@ def test_ignores_from_me_groups_and_non_upsert():
     assert ch.parse_inbound({"event": "presence.update"}) is None
 
 
+# ── presence.update (typing/recording) ──────────────────────────────────────────────
+
+JID = "5511999999999@s.whatsapp.net"
+
+# The shape below is NOT assumed — it was read off the running provider on 2026-08-23:
+#
+#   baileys/lib/Types/Events.d.ts   'presence.update': { id: string;
+#                                                        presences: { [participant]: PresenceData } }
+#   baileys/lib/Types/…             PresenceData.lastKnownPresence: WAPresence
+#   WAPresence                      'unavailable'|'available'|'composing'|'recording'|'paused'
+#
+# and Evolution forwards that payload UNCHANGED — its handler is
+# ``const payload = events['presence.update']; … sendDataWebhook(Events.PRESENCE_UPDATE, payload)``,
+# with its own group filter reading ``payload.id.includes('@g.us')``, which is why the parser
+# checks the same field the same way. The five states below are therefore the COMPLETE domain,
+# not a sample: a sixth would be a provider change, and this test is where it should surface.
+def _presence(state, *, jid=JID, key=None):
+    return {"event": "presence.update", "instance": "cogno_t",
+            "data": {"id": jid, "presences": {key or jid: {"lastKnownPresence": state}}}}
+
+
+def test_presence_is_parsed_by_its_OWN_method_never_as_a_message():
+    """The split is the point: a presence update must not acquire a message_id, a dedup claim
+    or a turn. ``parse_inbound`` keeps rejecting it (pinned above) and this is the only door."""
+    ch = _ch()
+    ev = ch.parse_presence(_presence("composing"))
+    assert ev is not None and ev.sender == JID and ev.state == "composing"
+    assert ch.parse_inbound(_presence("composing")) is None      # still not a message
+    assert ch.parse_presence(_upsert(key={"remoteJid": JID})) is None  # …and not the reverse
+
+
+def test_recording_counts_as_producing_input():
+    """A voice note takes longer to make than a sentence takes to type. Treating `recording`
+    as idle would fire the turn in the middle of the input that needs the most patience."""
+    ch = _ch()
+    assert ch.parse_presence(_presence("recording")).is_producing is True
+    assert ch.parse_presence(_presence("composing")).is_producing is True
+    assert ch.parse_presence(_presence("paused")).is_idle is True
+    # online/offline say NOTHING about input — neither predicate may claim them
+    for state in ("available", "unavailable"):
+        ev = ch.parse_presence(_presence(state))
+        assert ev.is_producing is False and ev.is_idle is False, state
+
+    # …and every WAPresence value is accounted for, so a provider adding a sixth cannot slip
+    # through as silently "not producing" — which would read as "the contact stopped".
+    from cogno_gateway.types import PRESENCE_IDLE, PRESENCE_PRODUCING
+    assert set(PRESENCE_PRODUCING) | set(PRESENCE_IDLE) | {"available", "unavailable"} == {
+        "unavailable", "available", "composing", "recording", "paused"}
+
+
+def test_presence_ignores_groups_and_unreadable_shapes():
+    ch = _ch()
+    assert ch.parse_presence(_presence("composing", jid="123@g.us")) is None
+    assert ch.parse_presence({"event": "messages.upsert"}) is None
+    assert ch.parse_presence({"event": "presence.update", "data": {}}) is None
+    assert ch.parse_presence(_presence("")) is None
+    # keyed by a normalised jid → the sole entry is unambiguous, so read it
+    ok = ch.parse_presence(_presence("composing", key="5511999999999@c.us"))
+    assert ok is not None and ok.state == "composing"
+    # …but several entries with no match is a GROUP shape: refuse rather than guess, or one
+    # member's typing would hold another conversation's turn open.
+    many = {"event": "presence.update",
+            "data": {"id": JID, "presences": {"a@s.whatsapp.net": {"lastKnownPresence": "composing"},
+                                              "b@s.whatsapp.net": {"lastKnownPresence": "paused"}}}}
+    assert ch.parse_presence(many) is None
+
+
+def test_only_evolution_advertises_presence():
+    """The capability is a Protocol, not a flag, so the channel matrix is checkable. Telegram
+    cannot satisfy it: the Bot API has no update type for a USER typing."""
+    from cogno_gateway import PresenceAwareChannel, TelegramChannel
+    assert isinstance(_ch(), PresenceAwareChannel)
+    assert not isinstance(TelegramChannel.__new__(TelegramChannel), PresenceAwareChannel)
+
+
 async def test_send_text_strips_jid_suffix(fake_httpx):
     fake_httpx.routes = {"sendText": FakeResponse({"key": {"id": "OUT1"}})}
     res = await _ch().send("5511999@s.whatsapp.net", OutboundMessage(text="hi"))

@@ -28,6 +28,49 @@ class MessageKind(str, Enum):
     UNKNOWN = "unknown"
 
 
+# The presence states Baileys/WhatsApp reports. Only two of them say anything about whether
+# input is still being produced; ``available``/``unavailable`` are online/offline and say
+# nothing at all, which is why they are named here but excluded from both predicates below.
+PRESENCE_PRODUCING = ("composing", "recording")
+PRESENCE_IDLE = ("paused",)
+
+
+@dataclass
+class PresenceEvent:
+    """The other side is producing input — or stopped.
+
+    **Not a message.** It has no ``message_id``, is never deduplicated, never becomes a turn
+    and never reaches the pipeline. Its only power is to move a deadline: it can DELAY a turn
+    (someone is still typing) or BRING IT FORWARD (they stopped). It can never be the reason a
+    turn happens, and never the reason one does not.
+
+    That asymmetry is deliberate, because the signal is best-effort in two independent ways.
+    Only Baileys-backed WhatsApp reports it at all — the Telegram Bot API has no update type
+    for a user typing, and neither does WhatsApp Cloud — and even there it arrives only if the
+    contact has not turned off "last seen and online" in their privacy settings. So **absence
+    of presence means "no information", never "they stopped"**: a reader that treats silence
+    as idle would fire early for every privacy-conscious contact.
+
+    ``recording`` counts as producing alongside ``composing``: a voice note takes longer to
+    make than a sentence takes to type, and dropping it would fire the turn in the middle of
+    exactly the input that needs the most patience.
+    """
+
+    channel: str
+    sender: str
+    state: str                     # composing | recording | paused | available | unavailable
+
+    @property
+    def is_producing(self) -> bool:
+        """Still typing or recording → a turn waiting on this sender should hold."""
+        return self.state in PRESENCE_PRODUCING
+
+    @property
+    def is_idle(self) -> bool:
+        """Stopped producing → a turn waiting on this sender may go NOW."""
+        return self.state in PRESENCE_IDLE
+
+
 @dataclass
 class MediaRef:
     """A reference to a media item — a provider file id or a URL. The bytes are

@@ -31,11 +31,12 @@ from cogno_gateway.types import (
     MediaRef,
     MessageKind,
     OutboundMessage,
+    PresenceEvent,
     Reaction,
     SendResult,
     Template,
 )
-from cogno_gateway.ports import Channel, GatewayError
+from cogno_gateway.ports import Channel, GatewayError, PresenceAwareChannel
 from cogno_gateway.chunker import split_message
 from cogno_gateway.web import WebChannel
 from cogno_gateway.telegram import TelegramChannel
@@ -49,6 +50,7 @@ __all__ = [
     "InboundMessage",
     "OutboundMessage",
     "MediaRef",
+    "PresenceEvent",
     "Reaction",
     "Location",
     "Button",
@@ -59,6 +61,7 @@ __all__ = [
     "ChannelConfig",
     "SendResult",
     "Channel",
+    "PresenceAwareChannel",
     "GatewayError",
     "split_message",
     "WebChannel",

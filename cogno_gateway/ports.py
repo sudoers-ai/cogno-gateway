@@ -12,7 +12,13 @@ from __future__ import annotations
 
 from typing import Mapping, Optional, Protocol, runtime_checkable
 
-from cogno_gateway.types import InboundMessage, MediaRef, OutboundMessage, SendResult
+from cogno_gateway.types import (
+    InboundMessage,
+    MediaRef,
+    OutboundMessage,
+    PresenceEvent,
+    SendResult,
+)
 
 
 class GatewayError(Exception):
@@ -38,3 +44,33 @@ class Channel(Protocol):
 
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
         """Send a reply to ``recipient`` (chat id / remoteJid / session id)."""
+
+
+@runtime_checkable
+class PresenceAwareChannel(Protocol):
+    """A channel whose provider ALSO reports whether the contact is producing input.
+
+    Deliberately a **separate, optional** Protocol rather than a method on :class:`Channel`,
+    for the same reason ``ToolCallingBackend`` is separate from ``LLMBackend`` in
+    cogno-synapse: most channels cannot satisfy it and should not have to pretend. A host
+    probes with ``isinstance(channel, PresenceAwareChannel)`` and simply gets less signal from
+    the ones that fail the check — no capability flags, no stubs returning None forever.
+
+    Who can satisfy it, and why the list is short:
+
+    * **Evolution / Baileys (WhatsApp)** — yes, via ``presence.update``, and only when the
+      host subscribes to ``PRESENCE_UPDATE`` on the webhook.
+    * **Telegram** — no. The Bot API has no update type for a *user* typing; ``sendChatAction``
+      is bot→user only. There is nothing to parse.
+    * **WhatsApp Cloud (Meta)** — no. Presence is not delivered to business webhooks.
+    * **Web** — it is our own UI, so it could emit one; not built.
+    """
+
+    name: str
+
+    def parse_presence(self, payload: dict) -> Optional[PresenceEvent]:
+        """Provider payload → ``PresenceEvent``, or ``None`` when it is not one.
+
+        A payload is either a message or a presence update, never both, so this is a sibling
+        of ``parse_inbound`` and not a replacement: a host calls ``parse_inbound`` first and
+        falls through to this one."""

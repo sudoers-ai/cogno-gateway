@@ -31,6 +31,7 @@ from cogno_gateway.types import (
     MediaRef,
     MessageKind,
     OutboundMessage,
+    PresenceEvent,
     Reaction,
     SendResult,
 )
@@ -74,6 +75,44 @@ class EvolutionChannel:
         if not ok:
             logger.warning("channel=whatsapp event=verify_failed reason=invalid_apikey")
         return ok
+
+    # ── parse presence (Evolution 'presence.update') ──────────────────
+    def parse_presence(self, payload: dict) -> Optional[PresenceEvent]:
+        """``presence.update`` → :class:`PresenceEvent`, else ``None``.
+
+        A SIBLING of :meth:`parse_inbound`, not a branch of it: presence is not a message, so
+        letting it through the message parser would give it a turn, a dedup claim and a place
+        in history that it must never have. ``parse_inbound`` keeps returning ``None`` here,
+        and its test pinning that stays true.
+
+        The payload nests the state under ``data.presences[jid].lastKnownPresence`` (Baileys
+        shape). The jid is read from the map's own key rather than from ``data.id`` because a
+        group payload carries several, and we take only the one matching ``data.id`` — a group
+        presence must not move a 1:1 deadline. Groups are ignored entirely, exactly as
+        :meth:`parse_inbound` ignores ``@g.us``.
+
+        Requires the host to subscribe ``PRESENCE_UPDATE`` on the webhook; without it this
+        method is simply never called, which is a supported state, not a failure.
+        """
+        if payload.get("event") != "presence.update":
+            return None
+        data = payload.get("data", {}) or {}
+        sender = str(data.get("id", "") or "")
+        if not sender or sender.endswith("@g.us"):
+            return None
+        presences = data.get("presences", {}) or {}
+        entry = presences.get(sender)
+        if not isinstance(entry, dict):
+            # Some builds key the map by a normalised jid; fall back to the sole entry when
+            # there is exactly one, and give up rather than guess when there are several.
+            values = [v for v in presences.values() if isinstance(v, dict)]
+            if len(values) != 1:
+                return None
+            entry = values[0]
+        state = str(entry.get("lastKnownPresence", "") or "").strip().lower()
+        if not state:
+            return None
+        return PresenceEvent(channel=self.name, sender=sender, state=state)
 
     # ── parse inbound (Evolution 'messages.upsert') ───────────────────
     def parse_inbound(self, payload: dict) -> Optional[InboundMessage]:
