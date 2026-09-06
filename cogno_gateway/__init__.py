@@ -44,6 +44,17 @@ from cogno_gateway.evolution import EvolutionChannel
 from cogno_gateway.cloud import WhatsAppCloudChannel
 from cogno_gateway.factory import create_channel
 from cogno_gateway.options import options_to_message, user_input
+from cogno_gateway.provisioning import (
+    DEFAULT_INSTANCE_TEMPLATE,
+    DEFAULT_WEBHOOK_PATH_TEMPLATE,
+    EVOLUTION_WEBHOOK_EVENTS,
+    EvolutionWhatsAppProvisioner,
+    InMemoryWhatsAppProvisioner,
+    WhatsAppConnection,
+    WhatsAppProvisioner,
+    WhatsAppStatus,
+    evolution_webhook_payload,
+)
 
 __all__ = [
     "MessageKind",
@@ -71,4 +82,13 @@ __all__ = [
     "create_channel",
     "options_to_message",
     "user_input",
+    "WhatsAppProvisioner",
+    "InMemoryWhatsAppProvisioner",
+    "EvolutionWhatsAppProvisioner",
+    "WhatsAppConnection",
+    "WhatsAppStatus",
+    "evolution_webhook_payload",
+    "EVOLUTION_WEBHOOK_EVENTS",
+    "DEFAULT_INSTANCE_TEMPLATE",
+    "DEFAULT_WEBHOOK_PATH_TEMPLATE",
 ]
