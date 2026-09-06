@@ -24,7 +24,14 @@ def create_channel(kind: str, config: ChannelConfig | None = None) -> Channel:
     """
     k = kind.lower()
     if k == "web":
-        return WebChannel(secret=(config.secret if config else ""))
+        # WebChannel is the outlier: it takes loose keywords rather than the config object,
+        # so every field it honours must be forwarded EXPLICITLY. ``require_secret`` was not,
+        # and a caller asking for verification silently got an open door — while the other
+        # three kinds, which read the config directly, failed closed on the same input.
+        return WebChannel(
+            secret=(config.secret if config else ""),
+            require_secret=(config.require_secret if config else False),
+        )
     if config is None:
         raise GatewayError(f"channel {kind!r} requires a ChannelConfig")
     if k == "telegram":
