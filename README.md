@@ -41,6 +41,38 @@ WhatsApp is pluggable — the host picks per tenant:
 - **`EvolutionChannel`** (`"evolution"`) — Evolution API, unofficial (QR/Baileys), free, full-featured; good for dev/testing.
 - **`WhatsAppCloudChannel`** (`"whatsapp_cloud"`) — the **official Meta Cloud API**, for production/compliance: HMAC webhook verification, free-form replies within the 24h service window, and **template** messages for proactive sends outside it (`OutboundMessage(template=Template(...))`).
 
+## Pairing a WhatsApp account (Evolution QR)
+
+`EvolutionChannel` talks to an instance that already exists. `cogno_gateway.provisioning` is the
+half that **brings one into existence**: create it, hand back the QR to scan, poll the connection
+state, keep the return address alive, and tear it down.
+
+```python
+from cogno_gateway import EvolutionWhatsAppProvisioner
+
+prov = EvolutionWhatsAppProvisioner(
+    base_url=evo_url, api_key=apikey,
+    webhook_base="https://my.app",                       # the public URL YOU serve
+    webhook_secret=secret,                               # → webhook headers.apikey
+    instance_template="myapp_{account}",                 # your naming, not ours
+    webhook_path_template="/webhook/whatsapp_evo-{account}")
+
+conn = await prov.connect("acct-42")          # → WhatsAppConnection(qrcode_base64=…, status=…)
+st   = await prov.status("acct-42")           # → WhatsAppStatus(state="open", webhook_ok=…)
+cfg  = ChannelConfig(**prov.channel_credentials("acct-42"))   # → a send-capable EvolutionChannel
+```
+
+`account` is an **opaque key you choose** — what it means (a tenant, a workspace, one user), how
+its instance is named and which URL you serve are your decisions, so they arrive as templates
+rather than as assumptions baked in here. The defaults are the identity mapping.
+
+`status()` also probes the **return address**, which the connection state says nothing about: an
+instance sits at `"open"` while every inbound message is delivered to a dead URL. It asks the
+*provider* where it will deliver (never our own store — that held the right URL all along), and
+re-points it when it is stale, but **only after proving your public URL answers** — an unguarded
+heal during an outage rewrites every account's webhook to a dead address. `InMemoryWhatsAppProvisioner`
+is the deterministic stub for dev/tests.
+
 ## Install
 
 ```bash
