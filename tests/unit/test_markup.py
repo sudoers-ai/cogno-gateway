@@ -230,15 +230,19 @@ async def test_the_conversion_happens_before_the_chunker(fake_httpx):
 
     The chunker is the last thing to touch the text, and it splits on whitespace — it reads no
     markup. Converting first means the pair is still intact when it is matched; converting after
-    would hand each chunk a half-pair that no rule here may touch. Every chunk of a long bold
-    reply must therefore carry the single asterisk, never the double one."""
+    would hand each chunk a half-pair that no rule here may touch, and the contact would get the
+    double asterisk back on exactly the replies long enough to be split.
+
+    So the case is a bold run that STRADDLES a chunk boundary, and nothing less will do: a reply
+    whose every bold run sits inside one chunk is converted identically either way, and a test
+    built from those cannot tell the two orders apart."""
     fake_httpx.routes = {"sendText": FakeResponse({"key": {"id": "m1"}})}
     ch = EvolutionChannel(ChannelConfig(base_url="http://evo:8080/", token="K", instance="i1",
                                         max_chars=80))
-    body = "\n\n".join(f"**Bloco {i}** com algum texto de enchimento para forçar a divisão."
-                       for i in range(4))
+    body = ("**Primeira frase bastante comprida para forçar a divisão aqui mesmo. "
+            "Segunda frase igualmente comprida para garantir o corte.**")
     await ch.send("55119@s.whatsapp.net", OutboundMessage(text=body))
     chunks = [body_of(c)["text"] for c in fake_httpx.calls if "sendText" in c["url"]]
-    assert len(chunks) > 1
-    assert all("**" not in c for c in chunks)
-    assert sum(c.count("*Bloco") for c in chunks) == 4
+    assert len(chunks) > 1                       # the run really was split
+    assert all("**" not in c for c in chunks)    # ...and no chunk kept the markdown pair
+    assert chunks[0].startswith("*P") and chunks[-1].endswith("*")
