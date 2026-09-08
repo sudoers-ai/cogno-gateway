@@ -98,8 +98,13 @@ A transport failure is returned (`ok=False`), not raised, so the host decides.
 ### Markup: send markdown, get the channel's dialect
 
 **Write `**bold**` and stop thinking about it.** Every adapter converts markdown bold into its
-own channel's dialect on the way out — `*bold*` on WhatsApp, stripped on Telegram, untouched on
-web — via `to_channel_markup`, which is exported if you ever need it directly.
+own channel's dialect on the way out — `*bold*` on WhatsApp, stripped on Telegram and on web —
+via `to_channel_markup`, which is exported if you ever need it directly.
+
+Telegram and web strip because neither renders markup **today**: this gateway sets no Telegram
+`parse_mode`, and the web widget draws the bubble as `whitespace-pre-wrap` with no markdown
+renderer behind it (measured, not assumed). Both cells carry that condition in the table, so
+they can be turned by whoever changes the surface.
 
 This is the gateway's job and not yours for one reason: **it is the only layer that knows the
 channel.** A tool has no channel in its call context, and the layer that writes the final reply

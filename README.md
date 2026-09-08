@@ -33,10 +33,11 @@ await tg.send(msg.sender, OutboundMessage(text="resposta"))   # auto-chunked
 ## Markup per channel, decided once
 
 Bold is written differently on every transport: `*one asterisk*` on WhatsApp, `**two**` in
-markdown, none at all on a channel nobody set a parse mode for. Write markdown and the adapter
+markdown, and nothing at all on a surface that renders no markup. Write markdown and the adapter
 converts on the way out (`to_channel_markup`) — the gateway is the only layer that knows which
 channel the text is going to. It is a delimiter swap, never a markdown renderer: arithmetic,
-globs and unpaired markers reach the contact exactly as written.
+globs and unpaired markers reach the contact exactly as written. Each cell of the table carries
+the reason it holds the value it does, so it can be turned when the surface changes.
 
 ## Decoupled from cognition & audio
 

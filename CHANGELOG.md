@@ -7,7 +7,8 @@
   markdown a voicer writes is a double one, and nothing converted between them, so replies
   reached the contact reading `**Setembro de 2026**`. Every adapter now converts on the way
   into the provider payload (`to_channel_markup`, exported): `*bold*` on WhatsApp, stripped on
-  Telegram (this gateway sets no `parse_mode`), untouched on web. A delimiter swap by
+  Telegram (this gateway sets no `parse_mode`) and on web (the widget renders
+  `whitespace-pre-wrap` with no markdown renderer). A delimiter swap by
   CommonMark's flanking rule, not a markdown renderer — `2 * 3 * 4`, globs and unpaired `**`
   are left exactly as written — applied before chunking and idempotent.
 

@@ -42,7 +42,7 @@ for. Leaving it is the only choice that cannot fabricate formatting.
 
 **Idempotent by construction.** Converting twice cannot damage the text: the WhatsApp output
 ``*x*`` no longer contains a ``**`` to match, the stripped output contains no marker at all,
-and the markdown cell is the identity. This matters because a second caller will eventually
+and the ``markdown`` cell is the identity. This matters because a second caller will eventually
 appear, and the second call must be a no-op rather than a corruption.
 """
 
@@ -66,20 +66,21 @@ __all__ = ["to_channel_markup"]
 #:   this gateway sets no ``parse_mode`` on ``sendMessage`` (grep the package — there is none),
 #:   so Telegram renders the body literally and every marker is just visible punctuation. See
 #:   the note below on what it would take to change that, and why it is not free.
-#: * ``web`` → left as markdown. **This is the one cell that diverges from praxis**, which holds
-#:   ``""`` for web on the stated ground that the widget renders no markup. That ground checks
-#:   out — the chat surface that consumes this channel's ``{session_id, response}`` payload
-#:   renders the assistant bubble as ``whitespace-pre-wrap``, and neither UI checkout depends on
-#:   a markdown renderer — so on today's widget a ``**`` reaches the contact visible here too.
-#:   The cell stays ``**`` because that is the instruction this module was built to, and because
-#:   flipping it is a decision about a surface in another repo that should be taken by whoever
-#:   owns that surface. It is one line, and this comment is the evidence for taking it.
+#: * ``web`` → strip, **because the widget of today does not render markdown**. Measured, not
+#:   assumed: the chat surface that consumes this channel's ``{session_id, response}`` payload
+#:   draws the assistant bubble as ``whitespace-pre-wrap`` (``SupportChatWidget.tsx``), and
+#:   neither UI checkout depends on a markdown renderer — no ``react-markdown``, ``marked``,
+#:   ``markdown-it`` or ``remark``. Leaving the pair here would ship the contact the exact defect
+#:   this module exists to close, on a second channel. **If that changes — the day the widget
+#:   gains a renderer — this cell changes with it, to** ``**``. The condition is written down
+#:   because a cell that carries its reason can be turned by whoever reads it, while a cell that
+#:   carries only its value is turned blind or never. Agrees with praxis, as all five now do.
 #: * ``markdown``/``plain`` are not gateway channel names. They are here so praxis's channel
 #:   vocabulary maps onto this table one-for-one instead of falling through the unknown branch.
 _BOLD_MARK = {
     "whatsapp": "*",
     "telegram": "",
-    "web": "**",
+    "web": "",
     "markdown": "**",
     "plain": "",
 }
@@ -104,7 +105,8 @@ _BOLD_RUN = re.compile(r"\*\*(?=\S)([^\n]+?)(?<=\S)\*\*")
 def to_channel_markup(text: str, channel: str = "") -> str:
     """Rewrite markdown bold into ``channel``'s dialect. Everything else is left alone.
 
-    ``**Setembro**`` → ``*Setembro*`` on WhatsApp, ``Setembro`` on Telegram, unchanged on web.
+    ``**Setembro**`` → ``*Setembro*`` on WhatsApp, and ``Setembro`` on Telegram and on web,
+    neither of which renders markup today.
     An unknown or empty channel falls to plain text — never an exception.
 
     An EMPTY channel resolving to plain is the second declared divergence from praxis, whose
@@ -123,9 +125,10 @@ def to_channel_markup(text: str, channel: str = "") -> str:
 
     mark = _BOLD_MARK.get(str(channel or "").strip().lower(), _UNKNOWN_MARK)
     if mark == _MD_BOLD:
-        # The identity cell. Returned unconverted rather than substituted with itself, so
-        # "the gateway does not touch this channel's text" is a property of the code and not
-        # an arithmetic accident of the table.
+        # The identity cell (``markdown``, the only one left since web was measured and moved).
+        # Returned unconverted rather than substituted with itself, so "the gateway does not
+        # touch this channel's text" is a property of the code and not an arithmetic accident
+        # of the table.
         return body
 
     return _BOLD_RUN.sub(lambda m: f"{mark}{m.group(1)}{mark}", body)

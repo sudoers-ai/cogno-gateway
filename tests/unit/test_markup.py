@@ -117,8 +117,28 @@ def test_telegram_gets_the_markers_removed_and_only_that():
     assert to_channel_markup("R$ 5 < R$ 10 & **pronto**", "telegram") == "R$ 5 < R$ 10 & pronto"
 
 
-def test_web_markdown_is_left_intact():
-    assert to_channel_markup("**Setembro**", "web") == "**Setembro**"
+def test_web_strips_the_markers_because_the_widget_renders_none():
+    """Web takes the same answer as Telegram, and for a measured reason rather than a guess.
+
+    The instruction this module was first built to said "leave web markdown intact", on the
+    assumption that something on the other side renders it. Nothing does: the chat surface that
+    consumes this channel's payload draws the bubble as ``whitespace-pre-wrap`` and neither UI
+    checkout depends on a markdown renderer. Left intact, the pair would reach the contact
+    visible on web exactly as it did on WhatsApp — this module's own defect, surviving on a
+    second channel.
+
+    The day the widget gains a renderer, this expectation flips to ``**Setembro**`` together
+    with the table cell; the cell carries that condition so it can be turned by whoever reads
+    it."""
+    assert to_channel_markup("**Setembro**", "web") == "Setembro"
+
+
+def test_the_markdown_cell_is_the_identity():
+    """The one cell that still leaves a pair standing, and the branch that returns early.
+
+    It is not a channel — it is there so a caller already speaking praxis's channel vocabulary
+    maps onto this table instead of falling through the unknown branch."""
+    assert to_channel_markup("**Setembro**", "markdown") == "**Setembro**"
 
 
 def test_unknown_channel_falls_to_plain_text_without_raising():
@@ -157,8 +177,15 @@ def test_the_bold_dialect_agrees_with_the_praxis_table():
     other (different repos, no dependency either way), so the literals are pinned here and the
     divergence is DECLARED rather than left to be discovered on a phone.
 
-    Where they agree, they must keep agreeing. Where they differ, there is exactly one cell,
-    and this test is what makes flipping it a deliberate act."""
+    All five cells agree, and the equality is asserted whole rather than key by key: two truths
+    about one fact is the thing this pair of tables exists to stop, and a subset comparison is
+    how a sixth key would slip in on one side only.
+
+    The last cell to agree was ``web``, and it is worth recording HOW it got here. It began as
+    ``**`` on the reasoning that a web widget renders markdown; measuring the widget showed it
+    does not, so leaving the pair standing would have shipped this module's own defect on a
+    second channel. The reason now travels inside the table, so the day the widget gains a
+    renderer both sides can be turned by someone who can see why."""
     praxis_bold = {           # cogno_praxis/render.py::_BOLD, read at 2c8c525
         "whatsapp": "*",
         "telegram": "",
@@ -166,14 +193,7 @@ def test_the_bold_dialect_agrees_with_the_praxis_table():
         "markdown": "**",
         "plain": "",
     }
-    agreeing = ["whatsapp", "telegram", "markdown", "plain"]
-    assert {k: _BOLD_MARK[k] for k in agreeing} == {k: praxis_bold[k] for k in agreeing}
-
-    # The one declared divergence. praxis emits nothing for web; this table leaves the voicer's
-    # markdown alone there. Both were written knowing the widget renders `whitespace-pre-wrap`
-    # with no markdown library, so on today's surface the pair stays visible on web — see the
-    # table's comment. Whoever owns that surface decides; until then the difference is pinned.
-    assert _BOLD_MARK["web"] == "**" != praxis_bold["web"]
+    assert _BOLD_MARK == praxis_bold
 
 
 # ── it reaches the wire ──────────────────────────────────────────────────────
@@ -203,9 +223,11 @@ async def test_telegram_send_puts_the_stripped_text_on_the_wire(fake_httpx):
     assert "parse_mode" not in body_of(sent[0])
 
 
-def test_web_serialize_leaves_the_markdown_alone():
+def test_web_serialize_strips_the_markers():
+    """``serialize`` and not ``send``: ``send`` returns without emitting anything, so this dict
+    is the web channel's only outbound door and the conversion has to happen here."""
     out = WebChannel().serialize("s1", OutboundMessage(text="**Setembro de 2026**"))
-    assert out["response"] == "**Setembro de 2026**"
+    assert out["response"] == "Setembro de 2026"
 
 
 async def test_the_menu_and_button_bodies_are_converted_too(fake_httpx):
