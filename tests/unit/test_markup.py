@@ -66,12 +66,18 @@ def test_arithmetic_is_not_markup():
 
 def test_other_loose_asterisks_survive():
     """The same boundary on the shapes that actually turn up in a reply: a bullet list, a
-    footnote marker, a glob, a shell path. None of them is a left-flanking pair."""
+    footnote marker, a glob, a shell path. None of them is a left-flanking pair.
+
+    The last two cases carry TWO loose asterisks on ONE line, and they are the ones that do the
+    work: a matcher too generous to be safe pairs them with each other, and a case list where
+    every line holds a single asterisk would stay green through exactly that defect."""
     for text in (
         "* item um\n* item dois",
         "Preço final *\n* sujeito a confirmação",
         "guarde em /var/log/*.log",
         "3 * 4 = 12",
+        "guarde em /var/log/*.log e em /tmp/*.tmp",
+        "12 * 2 unidades, 5 * 3 caixas",
     ):
         assert to_channel_markup(text, "whatsapp") == text
 
