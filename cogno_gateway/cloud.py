@@ -35,7 +35,7 @@ from typing import Mapping, Optional
 import httpx
 
 from cogno_gateway.chunker import split_message
-from cogno_gateway.markup import to_channel_markup
+from cogno_gateway.markup import log_outbound_markup, to_channel_markup
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -199,6 +199,11 @@ class WhatsAppCloudChannel:
         # See EvolutionChannel.send — same channel, same single-asterisk dialect, and the same
         # reason to convert before the chunker and before the interactive-body branches.
         text = to_channel_markup(message.text, self.name)
+        # ``whatsapp_cloud`` and not ``self.name``: this module's every other line says
+        # ``channel=whatsapp_cloud``, and it is the only thing in the record that tells this
+        # adapter from Evolution's — both are ``name = "whatsapp"`` and share that cell of the
+        # markup table.
+        log_outbound_markup(logger, "whatsapp_cloud", message.text, text)
         async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
             try:
                 if message.template is not None:

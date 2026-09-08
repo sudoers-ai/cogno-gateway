@@ -23,7 +23,7 @@ from typing import Mapping, Optional
 import httpx
 
 from cogno_gateway.chunker import split_message
-from cogno_gateway.markup import to_channel_markup
+from cogno_gateway.markup import log_outbound_markup, to_channel_markup
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -188,6 +188,7 @@ class EvolutionChannel:
         # branches never reach the chunker, so a conversion placed in the loop alone would leave
         # them behind.
         text = to_channel_markup(message.text, self.name)
+        log_outbound_markup(logger, "whatsapp", message.text, text)
         async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
             try:
                 if message.reaction:

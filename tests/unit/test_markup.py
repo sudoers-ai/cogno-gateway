@@ -282,14 +282,28 @@ def test_no_adapter_can_read_the_outbound_text_without_converting_it():
     worth a guard rather than a habit).
 
     So the list is DERIVED from the package instead of written down here: a new file with a new
-    ``send`` is covered on the day it lands."""
+    ``send`` is covered on the day it lands.
+
+    **The second reader, and why it is admitted rather than excused.** ``log_outbound_markup``
+    reads the same attribute to record how long it was, so a literal "every read is converted"
+    became false the day the record was added. The subject of this guard was never READING,
+    though — it is text reaching a PROVIDER PAYLOAD, and the recorder cannot put text anywhere:
+    it takes two strings and emits two integers, pinned by
+    ``test_outbound_markup_log.py::test_the_record_never_carries_the_reply_itself``. So the
+    exemption is exactly one callee, by name, on the line that calls it.
+
+    That opens one hole, and it is closed next door rather than here: an adapter that recorded
+    without converting would satisfy this line-level rule while shipping the original defect.
+    ``test_every_function_that_converts_also_records_it`` and its twin hold the pair together at
+    function level, in BOTH directions — either call without the other is a failure there."""
     package = pathlib.Path(__file__).resolve().parents[2] / "cogno_gateway"
     reads = [(f.name, n, line.strip())
              for f in sorted(package.glob("*.py"))
              for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
              if "message.text" in line]
     assert reads, "no outbound text read found — this guard has lost its subject"
-    unconverted = [r for r in reads if "to_channel_markup(" not in r[2]]
+    unconverted = [r for r in reads
+                   if "to_channel_markup(" not in r[2] and "log_outbound_markup(" not in r[2]]
     assert not unconverted, (
         "an outbound text path reads message.text without converting its markup: "
         + "; ".join(f"{f}:{n}" for f, n, _ in unconverted))

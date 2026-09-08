@@ -122,6 +122,38 @@ calling it twice changes nothing.
 > third-party behaviour and can only be established by sending to a real device. What is pinned
 > here is that the payload leaves with the channel's documented marker.
 
+#### The conversion leaves a record you can join against
+
+Every adapter that sends emits one INFO line right after converting:
+
+```
+channel=whatsapp       event=outbound_markup chars_in=544 chars_out=540
+channel=whatsapp_cloud event=outbound_markup chars_in=544 chars_out=540
+channel=telegram       event=outbound_markup chars_in=544 chars_out=536
+channel=web            event=outbound_markup chars_in=544 chars_out=536
+```
+
+It exists because nothing else in the stack can answer "what did the contact actually get?":
+you persist the reply *before* handing it to `send`, and the conversion happens *inside* it, so
+every stored number is pre-adapter. **`chars_in` is the figure you already log yourself** on the
+line above your `channel.send(...)` — join the two and the pre/post pair closes; a mismatch says
+something changed the text between your door and the adapter.
+
+Three properties worth knowing before you wire dashboards to it:
+
+- **Lengths, never the text.** The outbound reply is the contact's own data. Nothing here will
+  ever carry it, so this line needs no redaction path and no purge path.
+- **One line per outbound message, not per chunk** — the conversion runs before `split_message`.
+  A 1558-character reply split into three chunks still logs once.
+- **Emitted even when nothing changed.** A reply with no bold pair gives `chars_in ==
+  chars_out`; that is a real message with no markup in it. The *absence* of the line means the
+  conversion did not run — which is the distinction the record exists to draw. (No channel is on
+  the identity cell: WhatsApp swaps the marker, Telegram and web strip it.)
+
+It is INFO on purpose, which is a declared exception to this library's own "INFO is not
+per-request" rule — see `LOGGING.md`. At DEBUG it would sit behind a switch that is off in
+production, and a record nobody can read in production is not a record.
+
 > **On Telegram the host does not decide about the FIRST transport failure — the channel
 > already retried it once.** `TelegramChannel` pauses 0.5 s and repeats the one HTTP call that
 > failed, and only a second failure becomes the `ok=False` you see. So a `SendResult(ok=True)`
