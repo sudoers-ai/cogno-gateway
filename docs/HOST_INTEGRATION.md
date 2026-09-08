@@ -93,6 +93,28 @@ await channel.send(msg.sender, OutboundMessage(text="Escolha um serviço:",
 via `ChannelConfig.max_chars`) and returns a `SendResult(ok, message_ids, error)`.
 A transport failure is returned (`ok=False`), not raised, so the host decides.
 
+> **On Telegram the host does not decide about the FIRST transport failure — the channel
+> already retried it once.** `TelegramChannel` pauses 0.5 s and repeats the one HTTP call that
+> failed, and only a second failure becomes the `ok=False` you see. So a `SendResult(ok=True)`
+> from this channel can be the second attempt, and **Telegram delivery is at-least-once**: the
+> Bot API has no idempotency key, no client-supplied message id and no cheap read-back, so after
+> a read timeout "it never arrived" and "it arrived and the answer was lost" are genuinely
+> indistinguishable. The trade is deliberate and is written out in `TelegramChannel._post` — a
+> duplicate reply is understood in a second, a silently lost one is never noticed, because the
+> contact's own message showed as delivered on their side and they have no reason to repeat it.
+>
+> Two bounds worth knowing as an integrator. The retry is per **HTTP call**, not per `send()`,
+> so on a chunked reply the maybe-duplicate is confined to one chunk rather than re-delivering
+> every chunk that already succeeded. And it turns on `httpx.TransportError` only — no HTTP
+> response ever existed — so no status code is ever retried: a 4xx and a 5xx both mean the
+> server answered, and an answer repeated is the same answer.
+>
+> **The other channels do not do this**, and that asymmetry is not yet expressed in the `Channel`
+> port: `cloud`, `evolution` and `web` still surface the first transport failure to you. A host
+> that treats every channel as at-most-once is wrong about Telegram; one that assumes
+> at-least-once everywhere will under-deliver on the rest. `message_ids` is best-effort for the
+> same reason — when a call times out and its retry succeeds, the id recorded is the retry's.
+
 ---
 
 ## 4. Channels
