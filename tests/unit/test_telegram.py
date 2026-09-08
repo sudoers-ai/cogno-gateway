@@ -9,6 +9,7 @@ from cogno_gateway import (
     Reaction,
     TelegramChannel,
 )
+from cogno_gateway.chunker import split_message
 from tests.conftest import FakeResponse, body_of
 
 CFG = ChannelConfig(token="BOT123", secret="sek")
@@ -198,3 +199,136 @@ async def test_send_document_failure_is_reported(fake_httpx):
     fake_httpx.routes = {"/sendDocument": FakeResponse(status=400)}
     res = await _ch().send("42", OutboundMessage(media=[MediaRef(url="http://x/f.pdf")]))
     assert res.ok is False and "400" in res.error
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# The outbound error path: what the log SAYS, and how many times we try.
+#
+# Both properties were measured failing in production against a real contact: a reply of
+# 1558 chars logged `event=send_failed sent=0 error=` — an empty `error=`, which is
+# indistinguishable from no error at all — and no second attempt was ever made, so the reply
+# was simply lost. The contact's own message had shown as delivered on their side, so nothing
+# prompted them to ask again.
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _RecordingAsyncio:
+    """Stands in for the module's ``asyncio`` so the backoff is observable and free.
+
+    Patched onto the module's own name rather than onto the real ``asyncio`` module, so a test
+    never mutates the loop the test itself is running on."""
+
+    def __init__(self):
+        self.slept = []
+
+    async def sleep(self, seconds):
+        self.slept.append(seconds)
+
+
+@pytest.fixture
+def no_backoff(monkeypatch):
+    """Make the retry's pause instantaneous AND recorded."""
+    from cogno_gateway import telegram as tg
+    clock = _RecordingAsyncio()
+    monkeypatch.setattr(tg, "asyncio", clock)
+    return clock
+
+
+def _read_timeout():
+    """A read timeout exactly as httpx produces one: httpcore raises ``ReadTimeout(TimeoutError())``,
+    httpx re-raises it as ``ReadTimeout(str(inner))``, and ``str(TimeoutError())`` is ``""``. So the
+    message is empty in production — this is not a contrived construction."""
+    import httpx
+    return httpx.ReadTimeout("")
+
+
+def test_read_timeout_carries_no_message_at_all():
+    """The premise of the log defect, pinned separately so it cannot rot silently: if httpx ever
+    starts populating this message, the fallback below stops being load-bearing and we should know
+    from a failure here rather than by re-reading the source."""
+    assert str(_read_timeout()) == ""
+
+
+async def test_transport_error_is_logged_as_a_class_not_an_empty_string(fake_httpx, no_backoff, caplog):
+    """TWIN 1 — a transport error with an empty ``str(exc)`` must name the exception CLASS.
+
+    ``error=`` says nothing; a line that promises to say what happened and says nothing is
+    indistinguishable from "there was no error". ``error=ReadTimeout`` is the whole diagnosis
+    for this family: the request went out and no answer came back."""
+    import logging
+    fake_httpx.routes = {"sendMessage": _read_timeout()}   # fails on every attempt
+    with caplog.at_level(logging.WARNING, logger="cogno_gateway.telegram"):
+        res = await _ch().send("42", OutboundMessage(text="x" * 1558))
+
+    assert res.ok is False
+    assert res.error == "ReadTimeout"          # not "" — the mutation this test exists to catch
+    failed = [r.getMessage() for r in caplog.records if "event=send_failed" in r.getMessage()]
+    assert failed, "the failure must still be logged"
+    assert "error=ReadTimeout" in failed[0]
+    assert not failed[0].endswith("error="), "an empty error= reads as 'no error happened'"
+
+
+async def test_transport_failure_is_retried_once_and_the_second_attempt_happens(fake_httpx, no_backoff):
+    """TWIN 2 — a TRANSPORT failure gets exactly one retry, and the retry is a real second call.
+
+    The first attempt times out; the second succeeds. The reply that production lost is the reply
+    this test recovers."""
+    from tests.conftest import Script
+    fake_httpx.routes = {"sendMessage": Script(
+        _read_timeout(),                                   # attempt 1 — no answer came back
+        FakeResponse({"result": {"message_id": 9}}),       # attempt 2 — delivered
+    )}
+    res = await _ch().send("42", OutboundMessage(text="oi"))
+
+    sends = [c for c in fake_httpx.calls if "sendMessage" in c["url"]]
+    assert len(sends) == 2, "the retry must be an actual second request, not a re-read"
+    assert res.ok is True and res.message_ids == ["9"]
+    assert no_backoff.slept, "the retry must WAIT — an instant retry is a second shot at the same broken socket"
+
+
+async def test_four_hundred_is_not_retried(fake_httpx, no_backoff):
+    """TWIN 3 (negative, mandatory) — a 4xx is NOT retried.
+
+    The server answered, and an answer repeated is the same answer: retrying only duplicates the
+    request. This is the twin that must FAIL if the retry predicate is ever widened past
+    ``httpx.TransportError``."""
+    fake_httpx.routes = {"sendMessage": FakeResponse(
+        {"ok": False, "description": "Bad Request: chat not found"}, status=400)}
+    res = await _ch().send("42", OutboundMessage(text="oi"))
+
+    sends = [c for c in fake_httpx.calls if "sendMessage" in c["url"]]
+    assert len(sends) == 1, "a 4xx must be attempted exactly once"
+    assert no_backoff.slept == [], "no backoff was spent, because no retry was attempted"
+    assert res.ok is False and "chat not found" in res.error
+
+
+async def test_a_send_that_succeeds_first_time_makes_exactly_one_call(fake_httpx, no_backoff):
+    """TWIN 4 (over-tightening probe) — the happy path must be untouched: ONE call, not two.
+
+    Denominator: this asserts over the 1 sendMessage call a single-chunk reply produces. A retry
+    wired to fire unconditionally would double every message the gateway has ever sent, and the
+    three tests above would all still pass."""
+    res = await _ch().send("42", OutboundMessage(text="oi"))
+
+    sends = [c for c in fake_httpx.calls if "sendMessage" in c["url"]]
+    assert len(sends) == 1, f"expected 1 call, saw {len(sends)}: {[c['url'] for c in sends]}"
+    assert no_backoff.slept == []
+    assert res.ok is True
+
+
+async def test_the_retry_is_per_call_not_per_message(fake_httpx, no_backoff):
+    """The bound that keeps the duplicate to ONE chunk.
+
+    A 1558-char reply is split into several chunks. When a later chunk times out, the chunks that
+    already succeeded must NOT be sent again — retrying the whole ``send()`` would re-deliver them
+    for certain, trading a maybe-duplicate for a definite one."""
+    from tests.conftest import Script
+    ok = FakeResponse({"result": {"message_id": 1}})
+    fake_httpx.routes = {"sendMessage": Script(ok, _read_timeout(), ok)}
+    res = await _ch().send("42", OutboundMessage(text="x " * 800))   # > 600 chars → chunked
+
+    sends = [c for c in fake_httpx.calls if "sendMessage" in c["url"]]
+    chunks = split_message("x " * 800, max_chars=600)
+    assert len(chunks) > 1, "the fixture must actually chunk for this test to mean anything"
+    # one call per chunk, plus exactly one extra for the single chunk that timed out
+    assert len(sends) == len(chunks) + 1
+    assert res.ok is True
