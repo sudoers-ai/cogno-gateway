@@ -23,6 +23,7 @@ from typing import Mapping, Optional
 import httpx
 
 from cogno_gateway.chunker import split_message
+from cogno_gateway.markup import to_channel_markup
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -182,6 +183,11 @@ class EvolutionChannel:
         # digits are NOT a phone number and don't route, so keep the full JID for those.
         number = recipient if recipient.endswith("@lid") else recipient.split("@", 1)[0]
         max_chars = self._cfg.max_chars or 600
+        # WhatsApp's bold is a SINGLE asterisk; the voicer writes markdown's double one. Convert
+        # once, here, before the text is chunked or used as a menu/button body — those two
+        # branches never reach the chunker, so a conversion placed in the loop alone would leave
+        # them behind.
+        text = to_channel_markup(message.text, self.name)
         async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
             try:
                 if message.reaction:
@@ -196,7 +202,7 @@ class EvolutionChannel:
                     resp = await client.post(
                         f"{self._base}/message/sendList/{self._instance}",
                         headers=self._headers(),
-                        json={"number": number, "title": "", "description": message.text or " ",
+                        json={"number": number, "title": "", "description": text or " ",
                               "buttonText": message.list_menu.button,
                               "sections": [
                                   {"title": s.title,
@@ -209,13 +215,13 @@ class EvolutionChannel:
                     resp = await client.post(
                         f"{self._base}/message/sendButtons/{self._instance}",
                         headers=self._headers(),
-                        json={"number": number, "title": "", "description": message.text or " ",
+                        json={"number": number, "title": "", "description": text or " ",
                               "buttons": [{"type": "reply", "displayText": b.title, "id": b.id}
                                           for b in message.buttons]})
                     resp.raise_for_status()
                     ids.append(str(resp.json().get("key", {}).get("id", "")))
                 else:
-                    for chunk in split_message(message.text, max_chars=max_chars):
+                    for chunk in split_message(text, max_chars=max_chars):
                         resp = await client.post(
                             f"{self._base}/message/sendText/{self._instance}",
                             headers=self._headers(), json={"number": number, "text": chunk})

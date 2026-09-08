@@ -35,6 +35,7 @@ from typing import Mapping, Optional
 import httpx
 
 from cogno_gateway.chunker import split_message
+from cogno_gateway.markup import to_channel_markup
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -195,6 +196,9 @@ class WhatsAppCloudChannel:
         ids: list[str] = []
         url = f"{self._base}/{self._phone_id}/messages"
         max_chars = self._cfg.max_chars or 600
+        # See EvolutionChannel.send — same channel, same single-asterisk dialect, and the same
+        # reason to convert before the chunker and before the interactive-body branches.
+        text = to_channel_markup(message.text, self.name)
         async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
             try:
                 if message.template is not None:
@@ -208,7 +212,7 @@ class WhatsAppCloudChannel:
                 if message.list_menu is not None:
                     ids.append(await self._post(client, url, {
                         "messaging_product": "whatsapp", "to": recipient, "type": "interactive",
-                        "interactive": {"type": "list", "body": {"text": message.text or " "},
+                        "interactive": {"type": "list", "body": {"text": text or " "},
                                         "action": {"button": message.list_menu.button, "sections": [
                                             {"title": s.title,
                                              "rows": [{"id": r.id, "title": r.title} for r in s.rows]}
@@ -216,12 +220,12 @@ class WhatsAppCloudChannel:
                 elif message.buttons:
                     ids.append(await self._post(client, url, {
                         "messaging_product": "whatsapp", "to": recipient, "type": "interactive",
-                        "interactive": {"type": "button", "body": {"text": message.text or " "},
+                        "interactive": {"type": "button", "body": {"text": text or " "},
                                         "action": {"buttons": [
                                             {"type": "reply", "reply": {"id": b.id, "title": b.title}}
                                             for b in message.buttons]}}}))
                 else:
-                    for chunk in split_message(message.text, max_chars=max_chars):
+                    for chunk in split_message(text, max_chars=max_chars):
                         ids.append(await self._post(client, url, {
                             "messaging_product": "whatsapp", "to": recipient, "type": "text",
                             "text": {"body": chunk}}))

@@ -16,6 +16,8 @@ How to wire `cogno-gateway` into a real application. The library ships the
 | Concern | Owner |
 | --- | --- |
 | Verify signature, parse provider payload, fetch media, send, chunk outbound | **gateway** |
+| Outbound **markup** — markdown bold into the channel's own dialect | **gateway** |
+| Outbound **structure** — which fields, which order, which grouping | **host** / its tools |
 | The HTTP endpoint (FastAPI/Flask/…), routing, background tasks | **host** |
 | Per-tenant channel creds (bot token / Evolution apikey+instance / secret) | **host** |
 | Running cognition; STT/TTS (cogno-vox); feedback policy | **host** |
@@ -92,6 +94,33 @@ await channel.send(msg.sender, OutboundMessage(text="Escolha um serviço:",
 `send` chunks long text (`split_message`, default 600 chars / 6 chunks — override
 via `ChannelConfig.max_chars`) and returns a `SendResult(ok, message_ids, error)`.
 A transport failure is returned (`ok=False`), not raised, so the host decides.
+
+### Markup: send markdown, get the channel's dialect
+
+**Write `**bold**` and stop thinking about it.** Every adapter converts markdown bold into its
+own channel's dialect on the way out — `*bold*` on WhatsApp, stripped on Telegram and on web —
+via `to_channel_markup`, which is exported if you ever need it directly.
+
+Telegram and web strip because neither renders markup **today**: this gateway sets no Telegram
+`parse_mode`, and the web widget draws the bubble as `whitespace-pre-wrap` with no markdown
+renderer behind it (measured, not assumed). Both cells carry that condition in the table, so
+they can be turned by whoever changes the surface.
+
+This is the gateway's job and not yours for one reason: **it is the only layer that knows the
+channel.** A tool has no channel in its call context, and the layer that writes the final reply
+(the voicer) rewrites the marker anyway — measured on a live trace, an executor draft carrying
+one asterisk was delivered carrying two, with every other byte identical. So a formatting
+decision taken anywhere upstream is a suggestion; taken here it is the last word.
+
+It is a delimiter swap, not a markdown renderer: only a paired `**` run is touched, by
+CommonMark's own flanking rule, on one line. `2 * 3 * 4`, `2 ** 3 ** 4`, a glob, a bullet and an
+unpaired `**` all reach the contact exactly as written. It runs before `split_message`, so a
+bold run split across chunks is converted while its pair is still intact, and it is idempotent —
+calling it twice changes nothing.
+
+> **What this does NOT promise.** That the contact's app renders the result as bold. That is
+> third-party behaviour and can only be established by sending to a real device. What is pinned
+> here is that the payload leaves with the channel's documented marker.
 
 > **On Telegram the host does not decide about the FIRST transport failure — the channel
 > already retried it once.** `TelegramChannel` pauses 0.5 s and repeats the one HTTP call that
