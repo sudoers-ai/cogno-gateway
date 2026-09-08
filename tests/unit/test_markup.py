@@ -7,6 +7,8 @@ green, and changed nothing for anybody, so a converter nobody calls is the failu
 file is written against.
 """
 
+import pathlib
+
 import pytest
 
 from cogno_gateway import (
@@ -246,3 +248,26 @@ async def test_the_conversion_happens_before_the_chunker(fake_httpx):
     assert len(chunks) > 1                       # the run really was split
     assert all("**" not in c for c in chunks)    # ...and no chunk kept the markdown pair
     assert chunks[0].startswith("*P") and chunks[-1].endswith("*")
+
+
+def test_no_adapter_can_read_the_outbound_text_without_converting_it():
+    """The rule that outlives the four adapters that exist today.
+
+    Every outbound path in this package reads ``message.text``, and every one of them must hand
+    it to the converter — a fifth channel added later is exactly the one nobody would remember
+    to wire, and it would ship the defect this module was written for while the whole suite
+    stayed green (the previous attempt at this fix was green and inert; that is the failure mode
+    worth a guard rather than a habit).
+
+    So the list is DERIVED from the package instead of written down here: a new file with a new
+    ``send`` is covered on the day it lands."""
+    package = pathlib.Path(__file__).resolve().parents[2] / "cogno_gateway"
+    reads = [(f.name, n, line.strip())
+             for f in sorted(package.glob("*.py"))
+             for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
+             if "message.text" in line]
+    assert reads, "no outbound text read found — this guard has lost its subject"
+    unconverted = [r for r in reads if "to_channel_markup(" not in r[2]]
+    assert not unconverted, (
+        "an outbound text path reads message.text without converting its markup: "
+        + "; ".join(f"{f}:{n}" for f, n, _ in unconverted))
