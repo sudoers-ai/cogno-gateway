@@ -39,6 +39,26 @@ channel the text is going to. It is a delimiter swap, never a markdown renderer:
 globs and unpaired markers reach the contact exactly as written. Each cell of the table carries
 the reason it holds the value it does, so it can be turned when the surface changes.
 
+## Reaching the provider: two budgets, and a family that answers
+
+A reply is lost the same way whether the provider refused it or the connection never finished
+being made. The second one had no code: every adapter passed `ChannelConfig.timeout` to httpx as
+a single number, which httpx spreads over connect, read, write and pool alike — so an address
+that never answers could spend the whole budget a slow provider was meant to have. The two are
+now separate: **connect is short** (5 s, `COGNO_HTTP_CONNECT_TIMEOUT`), **read stays where you
+set it**.
+
+The address selection is explicit too, and it is not the happy-eyeballs you may assume is under
+you. anyio *does* race the **TCP** connect across families (RFC 6555) — but `httpcore` then runs
+the **TLS handshake** on the single stream that won that race, with no address left to go back
+for. An IPv6 address that completes the TCP handshake and then black-holes the TLS one wins the
+race precisely *because* it answered fast, and hangs there while the working IPv4 address is
+never tried. So `cogno_gateway.net` walks the families itself, across **both halves of the
+bind**: one address per family, IPv6 then IPv4, each attempt on the short connect budget,
+falling through on a dead connect *or* a dead handshake. `COGNO_HTTP_IP_FAMILY=auto|ipv4|ipv6`
+(default `auto`) if you would rather decide. Certificates and SNI still name the provider — the
+address is chosen below the origin, never by rewriting the URL.
+
 ## Decoupled from cognition & audio
 
 The gateway imports neither `cogno-anima` nor `cogno-vox`. Inbound audio comes back as **bytes** (`fetch_media`) for the host to run through vox STT; a voice reply is just `OutboundMessage(audio=tts_bytes)`. The host wires the two edges to the pipeline.

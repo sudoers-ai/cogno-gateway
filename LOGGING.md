@@ -58,6 +58,22 @@ veja `cogno/core/logging.py` no host como referência.
   `whatsapp` da tabela de markup, e o rótulo é o que os distingue. Qual dialecto
   correu lê-se melhor no par de números do que na tabela: a troca perde um
   carácter por delimitador, a remoção perde dois.
+- **WARNING em `event=ip_family_fallback`** — mesma excepção que o `send_retry`: é uma condição
+  RECUPERADA. A mensagem saiu, e esta é a única linha que diz que uma família de endereços teve
+  de ser abandonada para que saísse. O `phase=` distingue as duas metades da ligação (`tcp` = o
+  endereço não atende; `tls` = atende e o handshake nunca fecha) porque só a segunda é a que a
+  pilha por baixo não resolve sozinha. O bind normal é **DEBUG** (`event=ip_family_bound`).
+- **Nem o host nem o endereço aparecem nestas linhas.** O `base_url` de uma Evolution é a
+  instância do próprio inquilino, e um IP resolvido não acrescenta nada que a família já não
+  diga. O mesmo vale para a mensagem de `ip_family_exhausted`, que é devolvida em
+  `SendResult.error` e portanto vai parar ao log do host.
+- **WARNING em `event=ip_family_invalid` / `event=connect_timeout_invalid`**, uma vez por
+  processo e não por mensagem: a configuração é lida à entrada de cada envio, e um valor mal
+  escrito escreveria uma linha por mensagem — a forma que transforma um log em ruído e um log
+  ruidoso num log ignorado.
+- **WARNING em `event=ip_family_unavailable`** — o httpx deixou de expor o sítio onde a queda de
+  família se instala. O envio continua a funcionar (sem a queda); a linha existe porque uma
+  protecção que desaparece em silêncio é pior do que não a ter.
 - Parse/send de happy-path é **DEBUG** (o host é dono do ciclo de request).
 - O **payload bruto** do webhook vai em **DEBUG** (dev-only) e a **`apikey` da
   Evolution é redigida mesmo em DEBUG** — secret ≠ conteúdo de usuário; vazar

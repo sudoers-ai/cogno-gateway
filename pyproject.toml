@@ -23,7 +23,11 @@ classifiers = [
 ]
 # The channel adapters talk to provider HTTP APIs over httpx; the Web channel
 # needs nothing extra. No web framework — the host owns the HTTP endpoint.
-dependencies = ["httpx>=0.24"]
+# ``httpcore`` is httpx's own transport layer and is named explicitly because
+# ``cogno_gateway.net`` imports it directly: the address-family fallback is installed as
+# an ``httpcore`` network backend. The httpx floor moves to 0.27 for the same reason —
+# that is the first line where the pool/backend shape this depends on is the 1.x one.
+dependencies = ["httpx>=0.27", "httpcore>=1.0"]
 
 [project.urls]
 Homepage = "https://github.com/sudoers-ai/cogno-gateway"

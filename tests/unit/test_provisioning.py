@@ -570,5 +570,11 @@ async def test_without_an_injected_client_it_opens_its_own(monkeypatch):
     prov = EvolutionWhatsAppProvisioner(base_url="https://evo.test", api_key="k",
                                         webhook_base="https://host.test", timeout=7.0)
     assert (await prov.connect("acct")).qrcode_base64 == "QR"
-    assert 7.0 in seen
+    # The configured timeout is now the READ budget of a split ``httpx.Timeout`` — connect is
+    # separate and short (``cogno_gateway.net``). Asserting the pair rather than the number keeps
+    # the original property (the caller's timeout reaches the client it opens) and adds the one
+    # that replaced it: a provisioning call cannot spend 7 s waiting for an address to answer.
+    timeouts = [t for t in seen if isinstance(t, httpx.Timeout)]
+    assert timeouts, f"no timeout reached the client: {seen}"
+    assert all(t.read == 7.0 and t.connect is not None and t.connect < 7.0 for t in timeouts)
     assert await prov._webhook_base_is_live() is True

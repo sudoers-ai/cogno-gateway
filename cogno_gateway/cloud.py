@@ -36,6 +36,7 @@ import httpx
 
 from cogno_gateway.chunker import split_message
 from cogno_gateway.markup import log_outbound_markup, to_channel_markup
+from cogno_gateway.net import build_async_client
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -181,7 +182,7 @@ class WhatsAppCloudChannel:
 
     # ── fetch media (media-id → url → bytes) ──────────────────────────
     async def fetch_media(self, ref: MediaRef) -> bytes:
-        async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
+        async with build_async_client(self._cfg) as client:
             meta = await client.get(f"{self._base}/{ref.ref}", headers=self._headers())
             meta.raise_for_status()
             url = meta.json().get("url", "")
@@ -204,7 +205,7 @@ class WhatsAppCloudChannel:
         # adapter from Evolution's — both are ``name = "whatsapp"`` and share that cell of the
         # markup table.
         log_outbound_markup(logger, "whatsapp_cloud", message.text, text)
-        async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
+        async with build_async_client(self._cfg) as client:
             try:
                 if message.template is not None:
                     ids.append(await self._post(client, url, self._template_body(recipient,

@@ -32,7 +32,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol, runtime_checkable
 
-import httpx
+from cogno_gateway.net import build_async_client
 
 logger = logging.getLogger("cogno_gateway.provisioning")
 
@@ -195,7 +195,7 @@ class EvolutionWhatsAppProvisioner:
         if self._client is not None:
             return await self._client.request(method, f"{self._base}{path}", json=json,
                                               headers=headers)
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with build_async_client(timeout=self._timeout) as client:
             return await client.request(method, f"{self._base}{path}", json=json, headers=headers)
 
     async def connect(self, account: str, *, force: bool = False) -> WhatsAppConnection:
@@ -266,7 +266,7 @@ class EvolutionWhatsAppProvisioner:
                 resp = await self._client.request(
                     "GET", f"{self._webhook_base}{self._health_path}", json=None, headers={})
             else:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with build_async_client(timeout=10.0) as client:
                     resp = await client.request(
                         "GET", f"{self._webhook_base}{self._health_path}")
             return int(getattr(resp, "status_code", 500)) < 300

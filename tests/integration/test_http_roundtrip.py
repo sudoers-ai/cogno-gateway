@@ -44,7 +44,11 @@ def mock_http(monkeypatch):
         rec = _Recorder(responder)
 
         def factory(*args, **kwargs):
-            kwargs.setdefault("transport", httpx.MockTransport(rec))
+            # Assignment and not ``setdefault``: since the adapters build their client through
+            # ``cogno_gateway.net.build_async_client``, a transport is ALWAYS supplied — the
+            # family-fallback one. A ``setdefault`` here would quietly lose to it and this suite
+            # would leave the box looking for the real provider.
+            kwargs["transport"] = httpx.MockTransport(rec)
             return _REAL_ASYNC_CLIENT(*args, **kwargs)
 
         monkeypatch.setattr(httpx, "AsyncClient", factory)

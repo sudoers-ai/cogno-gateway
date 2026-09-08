@@ -18,6 +18,7 @@ import httpx
 
 from cogno_gateway.chunker import split_message
 from cogno_gateway.markup import log_outbound_markup, to_channel_markup
+from cogno_gateway.net import build_async_client
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -236,7 +237,7 @@ class TelegramChannel:
 
     # ── fetch media (getFile → download) ──────────────────────────────
     async def fetch_media(self, ref: MediaRef) -> bytes:
-        async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
+        async with build_async_client(self._cfg) as client:
             r = await client.get(f"{_API}/bot{self._token}/getFile",
                                   params={"file_id": ref.ref})
             r.raise_for_status()
@@ -266,7 +267,7 @@ class TelegramChannel:
         # this changes.
         text = to_channel_markup(message.text, self.name)
         log_outbound_markup(logger, "telegram", message.text, text)
-        async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
+        async with build_async_client(self._cfg) as client:
             try:
                 if message.reaction:
                     await self._post(
