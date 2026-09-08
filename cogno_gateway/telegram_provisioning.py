@@ -28,12 +28,24 @@ an admin click must surface the reason, never 500 and never claim success.
 :class:`NullTelegramRegistrar` is the explicit no-op for an assembly with no public URL: every
 call reports WHY instead of silently reporting success, which is the failure mode a plain
 ``None`` produces at the call site.
+
+**The outbound client is built by** :func:`cogno_gateway.net.build_async_client`, like every
+other adapter here, and that is the ONE line of this module that is not the code that arrived.
+The version written outside this library reached for ``httpx.AsyncClient`` directly, which is
+correct anywhere else and wrong here: it would take neither the split connect/read budgets nor
+the address-family walk, and a reply once failed to leave a box because a connection completed
+the TCP handshake over IPv6 and then never completed the TLS one. ``api.telegram.org`` is exactly
+that kind of call. ``test_every_adapter_reaches_the_provider_through_the_one_constructor`` is
+the guard that says so, mechanically, over every module in this package — it is what caught the
+verbatim import, and exempting it would have been the wrong repair.
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+
+from cogno_gateway.net import build_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -157,15 +169,13 @@ class TelegramWebhookRegistrar:
     async def _get(self, url: str) -> "Any":
         if self._client is not None:
             return await self._client.get(url)
-        import httpx
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with build_async_client(timeout=self._timeout) as client:
             return await client.get(url)
 
     async def _post(self, url: str, payload: dict) -> "Any":
         if self._client is not None:
             return await self._client.post(url, json=payload)
-        import httpx
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with build_async_client(timeout=self._timeout) as client:
             return await client.post(url, json=payload)
 
 

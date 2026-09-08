@@ -442,7 +442,8 @@ def test_the_guard_above_has_a_subject():
     users = [path.name for path in sorted(package.glob("*.py"))
              if path.name != "net.py" and "build_async_client(" in path.read_text(encoding="utf-8")]
 
-    assert users == ["cloud.py", "evolution.py", "provisioning.py", "telegram.py"]
+    assert users == ["cloud.py", "evolution.py", "provisioning.py", "telegram.py",
+                     "telegram_provisioning.py"]
 
 
 # ── the plain-HTTP path: no handshake to fall back on, and a wrapper that must not eat bytes ──
