@@ -24,6 +24,14 @@ veja `cogno/core/logging.py` no host como referência.
 
 - **WARNING** em `verify()` falho (assinatura/secret/apikey inválida) e em
   `HTTPError` no send (`SendResult.ok=False`).
+- **WARNING também num send que RECUPEROU**, e é a excepção à linha acima: o
+  `event=send_retry attempt=2` do Telegram dispara quando a 1.ª chamada HTTP falhou
+  por transporte, e a chamada seguinte pode ter sucesso — `SendResult.ok=True`. Não é
+  um caminho feliz a gritar: é o único registo de que aquela resposta pode agora
+  existir **duas vezes** no telemóvel do contacto, e sem esta linha não há como
+  contá-lo depois. O `after=` traz a CLASSE da excepção e nunca só o `str(exc)`, que
+  num `ReadTimeout` é vazio e faria a linha dizer `error=` — indistinguível de «não
+  houve erro».
 - Parse/send de happy-path é **DEBUG** (o host é dono do ciclo de request).
 - O **payload bruto** do webhook vai em **DEBUG** (dev-only) e a **`apikey` da
   Evolution é redigida mesmo em DEBUG** — secret ≠ conteúdo de usuário; vazar
