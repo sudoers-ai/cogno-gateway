@@ -50,6 +50,11 @@ from cogno_gateway.evolution import EvolutionChannel
 from cogno_gateway.cloud import WhatsAppCloudChannel
 from cogno_gateway.factory import create_channel
 from cogno_gateway.options import options_to_message, user_input
+from cogno_gateway.telegram_provisioning import (
+    NullTelegramRegistrar,
+    TelegramWebhookRegistrar,
+    build_telegram_registrar,
+)
 from cogno_gateway.provisioning import (
     DEFAULT_INSTANCE_TEMPLATE,
     DEFAULT_WEBHOOK_PATH_TEMPLATE,
@@ -101,4 +106,7 @@ __all__ = [
     "EVOLUTION_WEBHOOK_EVENTS",
     "DEFAULT_INSTANCE_TEMPLATE",
     "DEFAULT_WEBHOOK_PATH_TEMPLATE",
+    "TelegramWebhookRegistrar",
+    "NullTelegramRegistrar",
+    "build_telegram_registrar",
 ]
