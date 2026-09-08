@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+- **The markup conversion now leaves a record** — `channel=… event=outbound_markup
+  chars_in=… chars_out=…`, at INFO, from every adapter that sends. It exists because the
+  question "does the `**` still reach the contact?" had no column anywhere that could answer
+  it: the host persists the reply before the adapter sees it, its own `outbound_attempted
+  chars=` is measured on the line above `channel.send(...)`, and the conversion happens inside
+  `send`. **Lengths only, never the text** — the outbound reply is the contact's own data, and
+  a log that carried it would open a store of personal data to close a hole in observability.
+  One line per outbound message, not per chunk.
+
 ### Fixed
 - **Outbound markup is converted per channel.** WhatsApp bold is a SINGLE asterisk; the
   markdown a voicer writes is a double one, and nothing converted between them, so replies

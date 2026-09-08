@@ -18,7 +18,7 @@ import hmac
 import logging
 from typing import Mapping, Optional
 
-from cogno_gateway.markup import to_channel_markup
+from cogno_gateway.markup import log_outbound_markup, to_channel_markup
 from cogno_gateway.types import (
     InboundMessage,
     MediaRef,
@@ -117,10 +117,14 @@ class WebChannel:
 
         The markup pass runs HERE and not in :meth:`send`, which returns without emitting
         anything: this dict is the web channel's only outbound door."""
-        # The web cell of the table is the identity, so this call cannot change a byte today.
-        # It is here so that "the gateway leaves web markdown alone" is a decision recorded in
-        # one table with the other channels, rather than an omission nobody can find later.
-        out: dict = {"session_id": recipient, "response": to_channel_markup(message.text, self.name)}
+        # The web cell strips the pair (the widget renders no markdown — see markup.py). The
+        # record is written HERE and not in :meth:`send` for the same reason the conversion is:
+        # this dict is the channel's only outbound door. A host that calls ``send`` AND then
+        # ``serialize`` therefore logs twice — which is honest, because the conversion also ran
+        # twice.
+        response = to_channel_markup(message.text, self.name)
+        log_outbound_markup(logger, "web", message.text, response)
+        out: dict = {"session_id": recipient, "response": response}
         if message.media:
             out["media"] = [{"url": m.url or m.ref, "mime": m.mime, "caption": m.caption}
                             for m in message.media]

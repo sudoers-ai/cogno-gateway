@@ -48,9 +48,10 @@ appear, and the second call must be a no-op rather than a corruption.
 
 from __future__ import annotations
 
+import logging
 import re
 
-__all__ = ["to_channel_markup"]
+__all__ = ["log_outbound_markup", "to_channel_markup"]
 
 
 #: The bold delimiter to WRITE, per channel — the one table this module exists to own.
@@ -132,6 +133,56 @@ def to_channel_markup(text: str, channel: str = "") -> str:
         return body
 
     return _BOLD_RUN.sub(lambda m: f"{mark}{m.group(1)}{mark}", body)
+
+
+#: The event name of the one record this library writes about the conversion.
+_MARKUP_EVENT = "outbound_markup"
+
+
+def log_outbound_markup(logger: logging.Logger, channel: str, before: str, after: str) -> None:
+    """Record that the conversion ran, as two LENGTHS — never as text.
+
+    **Why a record is needed at all, stated as the measurement that could not be made.** After the
+    conversion shipped, the question "does the double asterisk still reach the contact?" was put to
+    the database, and no column could answer it in either direction: the host persists ``response``
+    BEFORE the adapter sees it, its own ``event=outbound_attempted chars=`` is measured on the line
+    above ``channel.send(...)``, and the conversion happens INSIDE ``send``. Nothing anywhere keeps
+    the post-conversion payload. So the number that came back was true about the field it read and
+    silent about the thing that was asked. This line is that missing field, written at the only
+    place that has it.
+
+    **Two integers, and the reply's own text is not one of them.** The converted string is what a
+    contact is about to read: it carries their name, their number, the figures a tool returned. A log
+    line that included it would open a new store of personal data in order to close a hole in
+    observability, which is the trade this codebase already refuses one layer up — the outbound-PII
+    allowlist carries digests and never values, for this reason and no other. ``chars_in``/
+    ``chars_out`` answer what was asked (did the conversion run, and did it change anything) and
+    carry no byte of the message. Where a field would be useful and is not safe, the safe one wins.
+
+    **It measures; it does not convert.** ``after`` is the string the caller is about to put on the
+    wire, handed in rather than recomputed here. A helper that re-ran the conversion in order to
+    report it would keep printing a delta on the day the adapter stopped calling the converter — the
+    line would be true about a conversion nobody performed. Because it is handed the real variable,
+    deleting the conversion from an adapter turns ``chars_out`` into ``chars_in``, which is a thing a
+    test can see.
+
+    **Emitted every time, including when nothing changed.** A reply with no bold pair is a genuine
+    ``chars_in == chars_out``, and logging only the interesting case would make that
+    indistinguishable from an adapter that never converts. Absence of this line has exactly one
+    meaning — the conversion did not run — and that is the distinction the record exists to draw.
+    (No adapter is on the identity cell today: ``markdown`` is the only cell that returns its input
+    unchanged and no channel is named ``markdown``. WhatsApp swaps the marker; Telegram and web
+    strip it. So an equal pair here reports a message with no bold in it, not a channel that never
+    converts.)
+
+    ``channel`` is the adapter's OWN log label, matching every other line the module writes — for
+    both WhatsApp adapters that is what tells ``whatsapp`` (Evolution) from ``whatsapp_cloud``
+    (Cloud API), which share the ``whatsapp`` cell of the table above. The pair of numbers is a
+    better guide to which dialect was applied than a table lookup would be anyway: a swap loses one
+    character per delimiter, a strip loses two.
+    """
+    logger.info("channel=%s event=%s chars_in=%d chars_out=%d",
+                channel, _MARKUP_EVENT, len(before), len(after))
 
 
 # ── What it would take to give Telegram real bold ────────────────────────────────────────────

@@ -17,7 +17,7 @@ from typing import Any, Mapping, Optional
 import httpx
 
 from cogno_gateway.chunker import split_message
-from cogno_gateway.markup import to_channel_markup
+from cogno_gateway.markup import log_outbound_markup, to_channel_markup
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -265,6 +265,7 @@ class TelegramChannel:
         # grounding — ran upstream of this library, so nothing downstream of here saw the text
         # this changes.
         text = to_channel_markup(message.text, self.name)
+        log_outbound_markup(logger, "telegram", message.text, text)
         async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
             try:
                 if message.reaction:
