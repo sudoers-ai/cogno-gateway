@@ -17,6 +17,7 @@ from typing import Any, Mapping, Optional
 import httpx
 
 from cogno_gateway.chunker import split_message
+from cogno_gateway.markup import to_channel_markup
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -258,6 +259,12 @@ class TelegramChannel:
         not delivered — nothing in this class can produce that evidence."""
         ids: list[str] = []
         max_chars = self._cfg.max_chars or 600
+        # Bold into this channel's dialect BEFORE chunking, so the pair is still intact when it
+        # is read (a run split across two chunks has no closing half left to match). Every guard
+        # that reads the reply — the PII backstop, the preserved-term check, synthesis drift,
+        # grounding — ran upstream of this library, so nothing downstream of here saw the text
+        # this changes.
+        text = to_channel_markup(message.text, self.name)
         async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
             try:
                 if message.reaction:
@@ -266,7 +273,7 @@ class TelegramChannel:
                         json={"chat_id": recipient,
                               "message_id": int(message.reaction.target_message_id or 0),
                               "reaction": [{"type": "emoji", "emoji": message.reaction.emoji}]})
-                chunks = split_message(message.text, max_chars=max_chars)
+                chunks = split_message(text, max_chars=max_chars)
                 markup = None
                 # Telegram has no native list UI — render buttons and list rows alike
                 # as an inline keyboard (one option per row).
@@ -277,7 +284,7 @@ class TelegramChannel:
                     markup = {"inline_keyboard": [
                         [{"text": b.title, "callback_data": b.id}] for b in kb_buttons]}
                     if not chunks:
-                        chunks = [message.text or " "]   # buttons need a message body
+                        chunks = [text or " "]   # buttons need a message body
                 for i, chunk in enumerate(chunks):
                     body: dict = {"chat_id": recipient, "text": chunk}
                     if markup and i == len(chunks) - 1:

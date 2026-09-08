@@ -38,6 +38,7 @@ from cogno_gateway.types import (
 )
 from cogno_gateway.ports import Channel, GatewayError, PresenceAwareChannel
 from cogno_gateway.chunker import split_message
+from cogno_gateway.markup import to_channel_markup
 from cogno_gateway.web import WebChannel
 from cogno_gateway.telegram import TelegramChannel
 from cogno_gateway.evolution import EvolutionChannel
@@ -75,6 +76,7 @@ __all__ = [
     "PresenceAwareChannel",
     "GatewayError",
     "split_message",
+    "to_channel_markup",
     "WebChannel",
     "TelegramChannel",
     "EvolutionChannel",
