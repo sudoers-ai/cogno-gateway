@@ -24,6 +24,7 @@ import httpx
 
 from cogno_gateway.chunker import split_message
 from cogno_gateway.markup import log_outbound_markup, to_channel_markup
+from cogno_gateway.net import build_async_client
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -167,7 +168,7 @@ class EvolutionChannel:
     # ── fetch media (getBase64FromMediaMessage) ───────────────────────
     async def fetch_media(self, ref: MediaRef) -> bytes:
         url = f"{self._base}/chat/getBase64FromMediaMessage/{self._instance}"
-        async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
+        async with build_async_client(self._cfg) as client:
             r = await client.post(url, headers=self._headers(),
                                   json={"message": {"key": {"id": ref.ref}}})
             r.raise_for_status()
@@ -189,7 +190,7 @@ class EvolutionChannel:
         # them behind.
         text = to_channel_markup(message.text, self.name)
         log_outbound_markup(logger, "whatsapp", message.text, text)
-        async with httpx.AsyncClient(timeout=self._cfg.timeout) as client:
+        async with build_async_client(self._cfg) as client:
             try:
                 if message.reaction:
                     resp = await client.post(

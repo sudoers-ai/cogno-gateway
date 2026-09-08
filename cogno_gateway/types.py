@@ -199,6 +199,10 @@ class ChannelConfig:
     # host sets it True in production so a signature-capable channel cannot run unverified.
     require_secret: bool = False
     max_chars: int = 0     # outbound chunk size (0 → adapter default)
+    # The READ budget: how long a provider may take to ANSWER. The connect budget is
+    # separate and much shorter (``cogno_gateway.net``) — an address that never answers
+    # is not the same risk as a provider taking its time, and one number for both is what
+    # let a dead address spend a whole request.
     timeout: float = 15.0
     extra: dict = field(default_factory=dict)
 

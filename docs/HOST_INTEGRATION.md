@@ -176,6 +176,28 @@ production, and a record nobody can read in production is not a record.
 > at-least-once everywhere will under-deliver on the rest. `message_ids` is best-effort for the
 > same reason — when a call times out and its retry succeeds, the id recorded is the retry's.
 
+> **`ChannelConfig.timeout` is now the READ budget, not the whole call.** It used to be handed
+> to httpx as one number covering connect, read, write and pool alike, so a host that raised it
+> to give a slow provider room was also giving a dead address that much time to fail in. The
+> connect phase is now separate and short — 5 s by default, `COGNO_HTTP_CONNECT_TIMEOUT` — and
+> capped at your value when yours is smaller, so lowering `timeout` still lowers everything.
+>
+> **And the connection walks address families.** One address per family, IPv6 then IPv4 by
+> default, falling through on a dead connect *or* a dead TLS handshake — the second one is the
+> case the stack below does not handle, because anyio's RFC 6555 race ends when the TCP connect
+> wins and the handshake runs on that winner alone. `COGNO_HTTP_IP_FAMILY=auto|ipv4|ipv6`
+> (default `auto`) if your network wants the decision made for it; an unrecognised value falls
+> back to `auto` rather than failing a send.
+>
+> Two things this changes for you as an integrator. The worst case for an unreachable provider
+> is now *families × connect* (2 × 5 s) instead of one full `timeout`, and on Telegram the retry
+> above it makes that 4 × 5 s before you see `ok=False` — bounded, and no longer multiplying a
+> dead family's wait. And when nothing connects, `SendResult.error` reads
+> `ip_family_exhausted (ipv6: ConnectTimeout; ipv4: ConnectError)`: the families that were tried
+> are named, because an error that does not say which one failed makes the next person guess.
+> The host is deliberately absent from that string — an Evolution `base_url` is a tenant's own
+> instance.
+
 ---
 
 ## 4. Channels
