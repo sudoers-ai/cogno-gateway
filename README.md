@@ -30,6 +30,14 @@ await tg.send(msg.sender, OutboundMessage(text="resposta"))   # auto-chunked
 
 `InboundMessage.kind` is a `MessageKind`: `TEXT · IMAGE · AUDIO · VIDEO · DOCUMENT · LOCATION · REACTION · STICKER · INTERACTIVE`. So a host handles **reactions** (emoji + target message id), **media** (a `MediaRef` resolved lazily via `fetch_media` — e.g. to feed audio to cogno-vox), **quick-reply buttons** (send `OutboundMessage(buttons=[Button(...)])`; the tap returns `kind=INTERACTIVE` with `selection.id`), replies, and plain text uniformly across channels.
 
+## Markup per channel, decided once
+
+Bold is written differently on every transport: `*one asterisk*` on WhatsApp, `**two**` in
+markdown, none at all on a channel nobody set a parse mode for. Write markdown and the adapter
+converts on the way out (`to_channel_markup`) — the gateway is the only layer that knows which
+channel the text is going to. It is a delimiter swap, never a markdown renderer: arithmetic,
+globs and unpaired markers reach the contact exactly as written.
+
 ## Decoupled from cognition & audio
 
 The gateway imports neither `cogno-anima` nor `cogno-vox`. Inbound audio comes back as **bytes** (`fetch_media`) for the host to run through vox STT; a voice reply is just `OutboundMessage(audio=tts_bytes)`. The host wires the two edges to the pipeline.
