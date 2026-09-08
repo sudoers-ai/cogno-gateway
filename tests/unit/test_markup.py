@@ -70,7 +70,12 @@ def test_other_loose_asterisks_survive():
 
     The last two cases carry TWO loose asterisks on ONE line, and they are the ones that do the
     work: a matcher too generous to be safe pairs them with each other, and a case list where
-    every line holds a single asterisk would stay green through exactly that defect."""
+    every line holds a single asterisk would stay green through exactly that defect.
+
+    Checked on every channel and not only WhatsApp, for a reason worth writing down: WhatsApp's
+    mark IS a single asterisk, so a matcher that wrongly pairs two loose ones rewrites them to
+    the same bytes and hides itself. It is on the channels that strip — Telegram, plain — that
+    the same defect deletes characters out of a contact's path or sum, in plain sight."""
     for text in (
         "* item um\n* item dois",
         "Preço final *\n* sujeito a confirmação",
@@ -79,7 +84,8 @@ def test_other_loose_asterisks_survive():
         "guarde em /var/log/*.log e em /tmp/*.tmp",
         "12 * 2 unidades, 5 * 3 caixas",
     ):
-        assert to_channel_markup(text, "whatsapp") == text
+        for channel in ("whatsapp", "telegram", "web", "carrier-pigeon"):
+            assert to_channel_markup(text, channel) == text
 
 
 def test_unpaired_double_asterisk_is_left_exactly_as_it_is():
