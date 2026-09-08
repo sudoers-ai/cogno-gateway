@@ -24,6 +24,7 @@ is allowed to take. So both are asserted: ``len(net.attempts)`` says how many ad
 """
 
 import logging
+import socket
 
 import httpcore
 import httpx
@@ -50,8 +51,11 @@ from cogno_gateway.net import (
 # Documentation-only addresses (RFC 3849 / RFC 5737). They are not routable and belong to nobody.
 V6 = "2001:db8::1"
 V4 = "192.0.2.1"
-AF_INET6 = 10
-AF_INET = 2
+# The platform's own constants and not the numbers they happen to be on Linux: the fake resolver
+# stands in for ``getaddrinfo``, so it must hand back what ``getaddrinfo`` hands back — 10 and 2
+# here, 30 and 2 on a BSD, and a test that hard-codes one of those is testing this machine.
+AF_INET6 = int(socket.AF_INET6)
+AF_INET = int(socket.AF_INET)
 BOTH = ((AF_INET6, V6), (AF_INET, V4))
 
 CFG = ChannelConfig(token="BOT123", secret="s")
