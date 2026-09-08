@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Added
+- **The Telegram twin of the WhatsApp provisioner** — `cogno_gateway.telegram_provisioning`
+  (`TelegramWebhookRegistrar`, `NullTelegramRegistrar`, `build_telegram_registrar`), exported at
+  the package root. The library declared this hole by omission: `TelegramChannel` **verifies**
+  `X-Telegram-Bot-Api-Secret-Token` on every delivery, fail-closed in production, and nothing
+  here ever told Telegram to **send** one. Verification without registration is half a lifecycle
+  — an application pairing a bot from its own admin surface got a channel born with no webhook
+  and no secret, the only writer in existence was an operator shell script, and "which features
+  work" therefore depended on which writer ran last. `register` (`setWebhook`), `unregister`
+  (`deleteWebhook`, with the 24-hour backlog as an explicit `drop_pending` choice rather than a
+  default nobody sees), and `bot_username` (`getMe`, best-effort: a label must never fail an
+  activation that worked). Errors come back as `(False, description)` in Telegram's own wording.
+  Moved in from an application that had written it alone; a webhook REGISTRAR belongs beside the
+  channel that VERIFIES what the registration causes to be sent, and the `allowed_updates` list
+  is now one definition instead of two that drift.
+
 - **The markup conversion now leaves a record** — `channel=… event=outbound_markup
   chars_in=… chars_out=…`, at INFO, from every adapter that sends. It exists because the
   question "does the `**` still reach the contact?" had no column anywhere that could answer

@@ -102,6 +102,35 @@ re-points it when it is stale, but **only after proving your public URL answers*
 heal during an outage rewrites every account's webhook to a dead address. `InMemoryWhatsAppProvisioner`
 is the deterministic stub for dev/tests.
 
+## Registering a Telegram bot's webhook
+
+`TelegramChannel` **verifies** `X-Telegram-Bot-Api-Secret-Token` on every delivery. Something has
+to have **told Telegram to send one** — that is `cogno_gateway.telegram_provisioning`, the
+Telegram twin of the WhatsApp half above.
+
+```python
+from cogno_gateway import TelegramWebhookRegistrar, build_telegram_registrar
+
+reg = TelegramWebhookRegistrar(webhook_base="https://my.app")   # the public URL YOU serve
+ok, why = await reg.register(token=bot_token, webhook_key="telegram-acme", secret=hook_secret)
+handle = await reg.bot_username(token=bot_token)                # "@acme_bot", or ""
+ok, why = await reg.unregister(token=bot_token, drop_pending=True)
+```
+
+`webhook_key` is an **opaque key you choose**, rendered into `{webhook_base}/webhook/{key}`.
+Failures come back as `(False, description)` in Telegram's own wording — an admin click must
+surface the reason, never 500 and never claim "registered".
+
+`unregister` is the half that is easy to leave out, and its absence is silent: switching a channel
+off on your side only stops *you*. Telegram keeps delivering to a URL that now 404s, retries,
+climbs `pending_update_count`, and replays the whole backlog the day the channel comes back.
+`drop_pending` decides what happens to the queue Telegram already holds (up to 24 h) — discard it
+and a message sent during a two-minute restart is lost; keep it and a day-old "can you book me for
+tomorrow at 9?" is answered as if it had just arrived. Nothing at this layer can tell the two
+apart, so the caller decides. `build_telegram_registrar()` returns a real registrar when
+`COGNO_PUBLIC_URL` (or `COGNO_BASE_URL`) is set and `NullTelegramRegistrar` otherwise — which
+reports *why* on every call instead of being a `None` the call site must remember to branch on.
+
 ## Install
 
 ```bash
