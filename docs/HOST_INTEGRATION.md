@@ -57,8 +57,9 @@ quick-reply / list option / inline button arrives as `kind=INTERACTIVE` with
 `selection: ButtonReply(id, title)` — the `id` is the payload you sent.
 
 **Group chats: reserved fields, still dropped.** A message you receive is a 1:1 message: the
-Telegram adapter drops `group`/`supergroup` chats (message, button tap and reaction) and the
-Evolution adapter drops `@g.us` (message and presence). `InboundMessage` nevertheless carries the
+Telegram adapter drops `group`/`supergroup` chats (message, button tap and reaction), the
+Evolution adapter drops `@g.us` (message and presence), and the WhatsApp Cloud adapter drops a
+message whose object carries a `group_id` (every kind; since 0.1.2). `InboundMessage` nevertheless carries the
 five fields a group will need, keyword-only and at the value that IS the 1:1 case:
 
 | field | default | means |
@@ -72,10 +73,13 @@ five fields a group will need, keyword-only and at the value that IS the 1:1 cas
 No adapter fills them yet, so a host that reads them reads the defaults. They stay out of `repr`
 while at their default; `dataclasses.asdict` does carry them (a dataclass field cannot leave it).
 `dataclasses.replace` carries them through, so normalising `sender` never loses the group.
-**WhatsApp Cloud is not covered by the drop:** Meta delivers a reply in a group the business
-created through its Groups API under the same `messages` webhook field, with a `group_id` in the
-message object, and `WhatsAppCloudChannel` does not read it yet — such a reply would be parsed as
-a 1:1 message of the participant.
+**WhatsApp Cloud marks a group only inside the message.** Meta delivers a reply in a group the
+business created through its Groups API under the same `messages` webhook field as a 1:1 message,
+with a `group_id` in the message object and `from` set to the participant. Until 0.1.2 the adapter
+did not read it, so such a reply arrived as a 1:1 message of the participant and the answer went
+to them in private; it is now dropped in `parse_batch`, and the 1:1 messages of the same delivery
+still arrive. A `group_id` that names no group — absent, `null`, empty or blank — is read as a
+1:1 message, exactly as before. **Inert for a host until it moves its pin of this library.**
 
 ---
 

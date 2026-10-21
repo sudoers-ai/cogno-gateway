@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.2 — 2026-10-21
+
+### Fixed
+- **A WhatsApp Cloud reply in a group is dropped at parse, like every other adapter's group
+  traffic.** Meta delivers a reply in a group the business created through its Groups API under
+  the same `messages` webhook field as a 1:1 message, and marks it only by a `group_id` inside the
+  message object, with `from` set to the participant ("The `message` object includes a `group_id`
+  field to indicate this is a group message",
+  https://developers.facebook.com/documentation/business-messaging/whatsapp/groups/groups-messaging/,
+  read 2026-10-21). `WhatsAppCloudChannel` did not read it, so the reply ran a turn as the
+  participant and the answer went to them in private. `WhatsAppCloudChannel._is_group` now drops
+  it in `parse_batch` (and so in `parse_inbound`), for every message kind, without dropping the
+  1:1 messages delivered beside it and without logging it as a parse failure. The drop is still
+  unconditional: no group field is filled and nothing of a group reaches a host.
+- **A `group_id` that names no group stays a 1:1 message** — absent, JSON `null`, empty or blank.
+  Meta's page says nothing of an empty one; an empty value is no group a reply could be addressed
+  to, the adapter already reads a present-but-null field as absent, and dropping a real 1:1
+  message on a blank key would lose it with nobody told. Those four shapes parse byte for byte as
+  on `6e7dc71` (`repr` and `asdict` digests taken there), and the 26-message 1:1 corpus is
+  unchanged. The strict `xfail` `test_a_cloud_group_reply_is_not_dropped_yet` is gone: the Cloud
+  shapes (text, interactive, template button, reaction, location, image, unknown) joined the drop
+  table of `tests/unit/test_inbound_group_fields.py`, each beside its twin without the `group_id`.
+
 ## 0.1.1 — 2026-10-21
 
 ### Added
