@@ -1,8 +1,29 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-10-21
 
 ### Added
+- **`InboundMessage` reserves the fields a group chat needs — and nothing reads or fills them
+  yet.** A group separates WHERE a reply goes from WHO spoke; the model had only `sender` for
+  both. Five keyword-only fields, each at the value that IS the 1:1 case: `conversation_id`
+  (`""` = reply to `sender`), `author` (`""` = the sender wrote it), `mentions_bot`,
+  `reply_to_bot`, `author_is_bot` (`False`). **Group traffic is still dropped at parse,
+  unconditionally** — Telegram `group`/`supergroup` (message, button tap, reaction) and Evolution
+  `@g.us` (message, presence) — so a host still only receives 1:1 messages, and for those the
+  change is invisible: `tests/unit/test_inbound_group_fields.py` parses a fixed 1:1 corpus
+  through all four adapters (26 messages) and pins `repr` byte for byte against digests taken on
+  `3ff003b`; `__match_args__`, positional construction and the order of the old fields are the
+  old ones. The fields stay out of `repr` while at their default (`InboundMessage.__repr__`).
+  `dataclasses.asdict` is the one place they appear, and it is pinned exactly: the five keys at
+  their default, every other key byte for byte the old one. `dataclasses.replace` carries them
+  through (a host normalises the WhatsApp `sender` that way).
+- **Known gap, written down instead of pinned as correct:** WhatsApp Cloud delivers a reply in a
+  group the business created through Meta's Groups API under the same `messages` webhook field,
+  with a `group_id` inside the message object (Meta's Groups API docs, read 2026-10-21), and
+  `WhatsAppCloudChannel` does not read it — such a reply is parsed as a 1:1 message of the
+  participant. `test_a_cloud_group_reply_is_not_dropped_yet` is a strict `xfail` describing the
+  drop; it turns into a failure the day the parser is fixed, so the fix has to flip it.
+
 - **The Telegram twin of the WhatsApp provisioner** — `cogno_gateway.telegram_provisioning`
   (`TelegramWebhookRegistrar`, `NullTelegramRegistrar`, `build_telegram_registrar`), exported at
   the package root. The library declared this hole by omission: `TelegramChannel` **verifies**
@@ -47,6 +68,8 @@
   constructor `build_async_client`, pinned by a guard derived from the package.
 
 ### Changed
+- **The version is now `0.1.1`** (`pyproject.toml`). This heading was `Unreleased`; every entry
+  under it — the ones above and below, unreleased since `0.1.0` — ships with this number.
 - `httpx>=0.27` and an explicit `httpcore>=1.0`: the family fallback is installed as an
   `httpcore` network backend, and 0.27 is the first httpx line with the 1.x pool shape it needs.
 

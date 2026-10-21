@@ -30,6 +30,16 @@ await tg.send(msg.sender, OutboundMessage(text="resposta"))   # auto-chunked
 
 `InboundMessage.kind` is a `MessageKind`: `TEXT · IMAGE · AUDIO · VIDEO · DOCUMENT · LOCATION · REACTION · STICKER · INTERACTIVE`. So a host handles **reactions** (emoji + target message id), **media** (a `MediaRef` resolved lazily via `fetch_media` — e.g. to feed audio to cogno-vox), **quick-reply buttons** (send `OutboundMessage(buttons=[Button(...)])`; the tap returns `kind=INTERACTIVE` with `selection.id`), replies, and plain text uniformly across channels.
 
+## 1:1 by design — group fields reserved, groups still dropped
+
+Every adapter drops group traffic at parse (Telegram `group`/`supergroup`, Evolution `@g.us`), so
+a host only ever receives 1:1 messages. `InboundMessage` already carries the fields a group needs —
+`conversation_id` (where to answer), `author` (who spoke), `mentions_bot`, `reply_to_bot`,
+`author_is_bot` — keyword-only and at the 1:1 default; **no adapter fills them yet**, and a 1:1
+message prints and compares exactly as before. WhatsApp Cloud is the one gap: Meta delivers a
+reply in a business-created group under the same `messages` webhook, with a `group_id` this
+parser does not read yet (pinned as an expected failure in `tests/unit/test_inbound_group_fields.py`).
+
 ## Markup per channel, decided once
 
 Bold is written differently on every transport: `*one asterisk*` on WhatsApp, `**two**` in
