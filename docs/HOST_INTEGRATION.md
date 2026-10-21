@@ -56,6 +56,27 @@ reactions carry `emoji` + `target_message_id`; replies carry `reply_to`. A tappe
 quick-reply / list option / inline button arrives as `kind=INTERACTIVE` with
 `selection: ButtonReply(id, title)` — the `id` is the payload you sent.
 
+**Group chats: reserved fields, still dropped.** A message you receive is a 1:1 message: the
+Telegram adapter drops `group`/`supergroup` chats (message, button tap and reaction) and the
+Evolution adapter drops `@g.us` (message and presence). `InboundMessage` nevertheless carries the
+five fields a group will need, keyword-only and at the value that IS the 1:1 case:
+
+| field | default | means |
+|---|---|---|
+| `conversation_id` | `""` | where a reply goes (the group); `""` = reply to `sender`, as today |
+| `author` | `""` | the member who wrote it; `""` = the sender wrote it |
+| `mentions_bot` | `False` | the text @-mentions this bot (meaningful only in a group) |
+| `reply_to_bot` | `False` | it replies to one of this bot's messages (only in a group) |
+| `author_is_bot` | `False` | the author is a bot |
+
+No adapter fills them yet, so a host that reads them reads the defaults. They stay out of `repr`
+while at their default; `dataclasses.asdict` does carry them (a dataclass field cannot leave it).
+`dataclasses.replace` carries them through, so normalising `sender` never loses the group.
+**WhatsApp Cloud is not covered by the drop:** Meta delivers a reply in a group the business
+created through its Groups API under the same `messages` webhook field, with a `group_id` in the
+message object, and `WhatsAppCloudChannel` does not read it yet — such a reply would be parsed as
+a 1:1 message of the participant.
+
 ---
 
 ## 3. Replying (outbound)

@@ -9,7 +9,7 @@ content** (``MessageKind``) so a host handles text, media, reactions, location,
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from typing import Optional
 
@@ -168,6 +168,44 @@ class InboundMessage:
     selection: Optional[ButtonReply] = None   # a tapped quick-reply / list option
     reply_to: str = ""                 # quoted/replied-to text, if any
     raw: dict = field(default_factory=dict)
+
+    # ── Group chats: WHERE to answer vs WHO spoke. RESERVED — no adapter fills them yet. ──
+    # Every adapter still DROPS group traffic at parse (Telegram `_is_group`, Evolution `@g.us`),
+    # so a message that reaches a host is a 1:1 message and these keep their defaults, which ARE
+    # the 1:1 case. They are keyword-only and left out of ``repr`` while at their default (see
+    # ``__repr__``), so a 1:1 message constructs, compares, matches and prints exactly as before.
+    conversation_id: str = field(default="", kw_only=True)
+    #   where a reply goes: the group JID (`…@g.us`) or the negative Telegram chat id.
+    #   "" = the sender's own 1:1 chat, i.e. reply to ``sender`` as today.
+    author: str = field(default="", kw_only=True)
+    #   the member who wrote it (Evolution `key.participant`, Telegram `from.id`).
+    #   "" = the sender is the author, which is always true of a 1:1 message.
+    mentions_bot: bool = field(default=False, kw_only=True)
+    #   the text @-mentions this bot. Meaningful only with ``conversation_id`` set.
+    reply_to_bot: bool = field(default=False, kw_only=True)
+    #   the message replies to one of this bot's own messages. Meaningful only in a group.
+    author_is_bot: bool = field(default=False, kw_only=True)
+    #   the author is a bot (Telegram `from.is_bot`). A 1:1 chat with a bot never reaches us.
+
+    def __repr__(self) -> str:
+        """The generated dataclass ``repr``, minus the group fields while they hold their default.
+
+        A 1:1 message therefore prints byte for byte as it did before the fields existed — the
+        string a log line or a failing assertion shows does not grow five constant entries on
+        every message — and a group message, the day an adapter fills them, shows exactly the
+        ones that say something."""
+        shown = []
+        for f in fields(self):
+            value = getattr(self, f.name)
+            if f.name in _GROUP_FIELDS and value == f.default:
+                continue
+            shown.append(f"{f.name}={value!r}")
+        return f"{type(self).__qualname__}({', '.join(shown)})"
+
+
+# The reserved group fields above, by name — the ones ``InboundMessage.__repr__`` leaves out at
+# their default. One definition, read by the repr and by the tests that pin the inertness.
+_GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "reply_to_bot", "author_is_bot")
 
 
 @dataclass
