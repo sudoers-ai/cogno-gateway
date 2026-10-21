@@ -14,8 +14,10 @@ can receive are 1:1 messages — and for those this file proves the change is in
 * **the shape** — positional construction, ``__match_args__`` and the order of the old fields are
   the old ones (the new fields are keyword-only);
 * **the drop** — a group message of each channel that has groups still parses to ``None``, beside
-  its 1:1 twin that still parses. WhatsApp Cloud is the exception, and it is written down as one
-  (``test_a_cloud_group_reply_is_not_dropped_yet``) rather than pinned as correct.
+  its 1:1 twin that still parses. WhatsApp Cloud joined it in 0.1.2: a Groups-API reply carries a
+  ``group_id`` in the message object, and the adapter now drops it; a ``group_id`` that names no
+  group (absent, ``null``, empty, blank) stays a 1:1 message, byte for byte as before
+  (``_CLOUD_CONTROL_BASE``, digests taken on ``6e7dc71``).
 
 The digests are a landing-time proof, taken on ``3ff003b`` (the ``main`` this change starts from):
 regenerate them only when a parser's 1:1 output changes ON PURPOSE.
@@ -278,6 +280,29 @@ def test_replace_carries_the_group_fields_through():
 
 
 # ── the drop: a group message of each channel still never becomes a message ─────────────────
+# WhatsApp Cloud marks a group message ONLY by a `group_id` inside the message object, under the
+# same `messages` webhook field as a 1:1 message, with `from` set to the participant: "The
+# `message` object includes a `group_id` field to indicate this is a group message" (Meta,
+# https://developers.facebook.com/documentation/business-messaging/whatsapp/groups/groups-messaging/
+# read 2026-10-21). Every kind the adapter parses, so the drop cannot be a branch of one of them.
+_CLOUD_GROUP_ID = "HBgLGRUPOINVENTADO"
+_CLOUD_GROUP_SHAPES: "dict[str, dict]" = {
+    "cloud_group_text": {"from": "5511900000002", "id": "wamid.g1", "type": "text",
+                         "text": {"body": "oi"}},
+    "cloud_group_interactive": {"from": "5511900000002", "id": "wamid.g2", "type": "interactive",
+                                "interactive": {"type": "button_reply",
+                                                "button_reply": {"id": "yes", "title": "Sim"}}},
+    "cloud_group_template_button": {"from": "5511900000002", "id": "wamid.g3", "type": "button",
+                                    "button": {"payload": "P", "text": "Confirmar"}},
+    "cloud_group_reaction": {"from": "5511900000002", "id": "wamid.g4", "type": "reaction",
+                             "reaction": {"emoji": "👍", "message_id": "wamid.0"}},
+    "cloud_group_location": {"from": "5511900000002", "id": "wamid.g5", "type": "location",
+                             "location": {"latitude": -23.5, "longitude": -46.6}},
+    "cloud_group_image": {"from": "5511900000002", "id": "wamid.g6", "type": "image",
+                          "image": {"id": "MID", "mime_type": "image/jpeg", "caption": "c"}},
+    "cloud_group_unknown": {"from": "5511900000002", "id": "wamid.g7", "type": "order"},
+}
+
 GROUP_DROPS: "dict[str, tuple]" = {
     "tg_group_text": (_TG, {"message": {"chat": {"id": -1001, "type": "group"}, "message_id": 7,
                                         "from": {"id": 7, "is_bot": False},
@@ -306,6 +331,8 @@ GROUP_DROPS: "dict[str, tuple]" = {
     "evo_group_old_id": (_EVO, _upsert(key={"remoteJid": "551190000000-1600000000@g.us", "id": "G2",
                                             "participant": "5511900000002@s.whatsapp.net"},
                                        messageType="conversation", message={"conversation": "oi"})),
+    **{label: (_CLOUD, _cloud(dict(message, group_id=_CLOUD_GROUP_ID)))
+       for label, message in _CLOUD_GROUP_SHAPES.items()},
 }
 
 # The SAME shapes with the group taken out — the twin that proves the drop is about the group.
@@ -329,6 +356,8 @@ ONE_TO_ONE_TWINS: "dict[str, tuple]" = {
                                      message={"extendedTextMessage": {"text": "marca amanhã"}})),
     "evo_group_old_id": (_EVO, _upsert(key={"remoteJid": "5511900000002@s.whatsapp.net", "id": "G2"},
                                        messageType="conversation", message={"conversation": "oi"})),
+    # the Cloud twin is the same message object without its `group_id`
+    **{label: (_CLOUD, _cloud(message)) for label, message in _CLOUD_GROUP_SHAPES.items()},
 }
 
 
@@ -351,12 +380,63 @@ def test_a_group_presence_still_never_moves_a_deadline():
     assert _EVO.parse_presence(twin) is not None
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "WhatsApp Cloud delivers a group reply under the SAME `messages` webhook field, with a "
-    "`group_id` inside the message object (Meta Groups API docs, read 2026-10-21); the parser "
-    "does not read `group_id` yet, so the reply is parsed as a 1:1 message of the participant. "
-    "A separate fix: when it lands, this test passes and the strict xfail makes it say so."))
-def test_a_cloud_group_reply_is_not_dropped_yet():
-    payload = _cloud({"from": "5511900000002", "group_id": "HBgLGRUPOINVENTADO", "id": "wamid.g1",
-                      "type": "text", "text": {"body": "oi"}})
-    assert _CLOUD.parse_inbound(payload) is None
+def test_every_cloud_group_shape_is_in_the_drop_table_with_a_twin():
+    """The control for the parametrised drop above: the Cloud shapes are IN it, each beside a twin
+    that differs from it by the `group_id` alone."""
+    for label, message in _CLOUD_GROUP_SHAPES.items():
+        assert label in GROUP_DROPS and label in ONE_TO_ONE_TWINS
+        group = GROUP_DROPS[label][1]["entry"][0]["changes"][0]["value"]["messages"][0]
+        twin = ONE_TO_ONE_TWINS[label][1]["entry"][0]["changes"][0]["value"]["messages"][0]
+        assert group == dict(twin, group_id=_CLOUD_GROUP_ID) and "group_id" not in twin
+
+
+def test_a_cloud_group_reply_drops_without_dropping_the_rest_of_its_delivery(caplog):
+    """Meta batches several messages, entries and changes into one POST. The group reply is the
+    only thing that leaves: the 1:1 messages around it parse, in order, and the drop is not logged
+    as a parse failure (it is not one — the other adapters drop a group silently too)."""
+    group = dict(_CLOUD_GROUP_SHAPES["cloud_group_text"], group_id=_CLOUD_GROUP_ID)
+    first = {"from": "5511900000004", "id": "wamid.a", "type": "text", "text": {"body": "um"}}
+    beside = {"from": "5511900000006", "id": "wamid.c", "type": "text", "text": {"body": "tres"}}
+    last = {"from": "5511900000005", "id": "wamid.b", "type": "text", "text": {"body": "dois"}}
+    payload = {"entry": [{"changes": [{"value": {"messages": [first, group, beside]}}]},
+                         {"changes": [{"value": {"messages": [last]}}]}]}
+    with caplog.at_level("DEBUG", logger="cogno_gateway.cloud"):
+        batch = _CLOUD.parse_batch(payload)
+    assert [(m.sender, m.message_id, m.text) for m in batch] == [
+        ("5511900000004", "wamid.a", "um"), ("5511900000006", "wamid.c", "tres"),
+        ("5511900000005", "wamid.b", "dois")]
+    assert "parse_message_failed" not in caplog.text
+    # a delivery whose only message is a group reply: nothing, and parse_inbound agrees
+    only = _cloud(group)
+    assert _CLOUD.parse_batch(only) == [] and _CLOUD.parse_inbound(only) is None
+
+
+# A `group_id` that names no group is the 1:1 path. Meta's page describes the field only as the
+# marker of a group message and the group id as what a reply is addressed to; it says nothing of an
+# empty one. An empty or blank value names no group to answer, this adapter already reads a
+# present-but-null field as absent, and the costs are not symmetric: dropping a real 1:1 message on
+# a blank key loses it with nobody told, keeping it is what every message got before.
+_CLOUD_CONTROL_MESSAGE = {"from": "5511900000002", "id": "wamid.c1", "type": "text",
+                          "text": {"body": "oi"}}
+_CLOUD_CONTROLS: "dict[str, dict]" = {
+    "absent": dict(_CLOUD_CONTROL_MESSAGE),
+    "empty": dict(_CLOUD_CONTROL_MESSAGE, group_id=""),
+    "null": dict(_CLOUD_CONTROL_MESSAGE, group_id=None),
+    "blank": dict(_CLOUD_CONTROL_MESSAGE, group_id="   "),
+}
+# Taken on 6e7dc71 (before the Cloud drop): (`repr`, `asdict` as sorted JSON) of each control.
+_CLOUD_CONTROL_BASE: "dict[str, tuple[str, str]]" = {
+    "absent": ("8fa5ddc59ba27235", "0cd70e9c71f2f551"),
+    "empty": ("62200a04bdcd136a", "9e90485693df8999"),
+    "null": ("689ed424fc91745c", "0b145e48e6db2a7a"),
+    "blank": ("cf9d4116d136e516", "2306b0dbf429e487"),
+}
+
+
+@pytest.mark.parametrize("label", sorted(_CLOUD_CONTROLS))
+def test_a_cloud_group_id_that_names_no_group_stays_a_1to1_message_byte_for_byte(label):
+    msg = _CLOUD.parse_inbound(_cloud(_CLOUD_CONTROLS[label]))
+    assert isinstance(msg, InboundMessage)
+    as_json = json.dumps(dataclasses.asdict(msg), sort_keys=True, ensure_ascii=False, default=str)
+    assert (_digest(repr(msg)), _digest(as_json)) == _CLOUD_CONTROL_BASE[label]
+    assert (msg.sender, msg.text) == ("5511900000002", "oi")
