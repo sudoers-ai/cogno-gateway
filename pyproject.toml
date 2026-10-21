@@ -1,6 +1,6 @@
 [project]
 name = "cogno-gateway"
-version = "0.1.1"
+version = "0.1.2"
 description = "Messaging transport edge for the Cogno cognitive pipeline — Telegram / WhatsApp (Evolution) / Web channel adapters behind a normalized, content-typed message model"
 readme = "README.md"
 requires-python = ">=3.10"

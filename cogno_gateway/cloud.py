@@ -23,6 +23,9 @@ WhatsApp username and hides their phone, ``messages[].from`` becomes conditional
 ``parse_inbound`` surfaces the BSUID as ``InboundMessage.sender_user_id`` and
 falls back to it for ``sender`` when the phone is absent — hosts should key
 identity on the BSUID and treat the phone as enrichment.
+
+Groups (Meta's Groups API): a message whose object carries a ``group_id`` is DROPPED at parse,
+like every other adapter's group traffic — see ``WhatsAppCloudChannel._is_group``.
 """
 
 from __future__ import annotations
@@ -124,10 +127,27 @@ class WhatsAppCloudChannel:
                 value = (change or {}).get("value") or {}
                 for message in value.get("messages") or []:
                     try:
+                        if self._is_group(message or {}):
+                            continue  # 1:1 only — see _is_group
                         out.append(self._parse_message(message or {}, value))
                     except Exception:  # noqa: BLE001 — one bad message must not drop the batch
                         logger.warning("channel=whatsapp_cloud event=parse_message_failed")
         return out
+
+    @staticmethod
+    def _is_group(message: dict) -> bool:
+        """Cogno is 1:1 by design — the Cloud mirror of Telegram's ``group``/``supergroup`` and
+        Evolution's ``@g.us`` drop. Meta delivers a reply in a Groups-API group under the SAME
+        ``messages`` webhook field as a 1:1 message and marks it only by a ``group_id`` in the
+        message object, with ``from`` set to the PARTICIPANT. Read as 1:1, it ran a turn as that
+        participant and the answer went to them in private.
+
+        A ``group_id`` that names no group — absent, JSON ``null``, empty or blank — is the 1:1
+        path: it is no group a reply could be addressed to, this module already reads a
+        present-but-null field as absent, and dropping a real 1:1 message on a blank key would
+        lose it with nobody told, where keeping it is what every message got before."""
+        group_id = message.get("group_id")
+        return group_id is not None and bool(str(group_id).strip())
 
     def _parse_message(self, message: dict, value: dict) -> InboundMessage:
         # BSUID (business-scoped user id): the stable identity key once usernames land.

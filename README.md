@@ -32,13 +32,12 @@ await tg.send(msg.sender, OutboundMessage(text="resposta"))   # auto-chunked
 
 ## 1:1 by design — group fields reserved, groups still dropped
 
-Every adapter drops group traffic at parse (Telegram `group`/`supergroup`, Evolution `@g.us`), so
-a host only ever receives 1:1 messages. `InboundMessage` already carries the fields a group needs —
-`conversation_id` (where to answer), `author` (who spoke), `mentions_bot`, `reply_to_bot`,
-`author_is_bot` — keyword-only and at the 1:1 default; **no adapter fills them yet**, and a 1:1
-message prints and compares exactly as before. WhatsApp Cloud is the one gap: Meta delivers a
-reply in a business-created group under the same `messages` webhook, with a `group_id` this
-parser does not read yet (pinned as an expected failure in `tests/unit/test_inbound_group_fields.py`).
+Every adapter drops group traffic at parse (Telegram `group`/`supergroup`, Evolution `@g.us`,
+WhatsApp Cloud a message carrying a `group_id`), so a host only ever receives 1:1 messages.
+`InboundMessage` already carries the fields a group needs — `conversation_id` (where to answer),
+`author` (who spoke), `mentions_bot`, `reply_to_bot`, `author_is_bot` — keyword-only and at the
+1:1 default; **no adapter fills them yet**, and a 1:1 message prints and compares exactly as
+before. A Cloud `group_id` that names no group (absent, `null`, empty, blank) stays 1:1.
 
 ## Markup per channel, decided once
 
