@@ -132,10 +132,12 @@ CONNECT_TIMEOUT_ENV = "COGNO_HTTP_CONNECT_TIMEOUT"
 DEFAULT_CONNECT_TIMEOUT = 5.0
 
 #: The name in the error raised when no family connected. It travels in the exception MESSAGE
-#: rather than in a new exception class on purpose: ``TelegramChannel._error_detail`` already
-#: reports ``str(exc) or type(exc).__name__`` for a transport failure, and httpx re-raises
-#: httpcore's exceptions as its own — a bespoke class would be flattened to ``ConnectError`` on
-#: the way up, while the message survives intact. One channel for the diagnosis, not two.
+#: rather than in a new exception class on purpose: ``cogno_gateway.telegram._error_detail``
+#: already reports ``str(exc) or type(exc).__name__`` for a transport failure in
+#: ``SendResult.error`` (the bot token masked; the log lines carry the class only), and httpx
+#: re-raises httpcore's exceptions as its own — a bespoke class would be flattened to
+#: ``ConnectError`` on the way up, while the message survives intact. One channel for the
+#: diagnosis, not two.
 FAMILIES_EXHAUSTED = "ip_family_exhausted"
 
 Resolved = typing.Sequence[typing.Tuple[int, str]]

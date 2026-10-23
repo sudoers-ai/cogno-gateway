@@ -30,9 +30,21 @@ veja `cogno/core/logging.py` no host como referência.
   por transporte, e a chamada seguinte pode ter sucesso — `SendResult.ok=True`. Não é
   um caminho feliz a gritar: é o único registo de que aquela resposta pode agora
   existir **duas vezes** no telemóvel do contacto, e sem esta linha não há como
-  contá-lo depois. O `after=` traz a CLASSE da excepção e nunca só o `str(exc)`, que
-  num `ReadTimeout` é vazio e faria a linha dizer `error=` — indistinguível de «não
-  houve erro».
+  contá-lo depois. O `after=` traz SÓ a CLASSE da excepção, nunca o `str(exc)`: num
+  `ReadTimeout` ele é vazio e faria a linha dizer `error=`, indistinguível de «não
+  houve erro», e nenhum texto escrito pela excepção entra numa linha de log.
+- **O `event=send_failed` do Telegram traz `error=<classe> status=<código|none>` e mais
+  nada.** O token do bot está no caminho de cada URL da Bot API (`/bot<TOKEN>/…`) e o
+  httpx escreve o URL no texto do `HTTPStatusError`; numa resposta sem corpo (redirect,
+  5xx de um proxy) esse texto era o erro inteiro, e a linha levava o token. A razão com
+  as palavras do Telegram vai para o host em `SendResult.error`, com o token mascarado
+  como `[token]` (`/bot[token]/`), em claro e percent-encoded.
+- **O logger `httpx` é do host, e escreve o URL com o token.** O httpx regista cada
+  pedido em INFO (`HTTP Request: POST https://api.telegram.org/bot<TOKEN>/…`), também os
+  que correm bem. Esta lib não mexe no nível de um logger alheio (regra 1); um host que
+  põe a raiz em INFO mantém `logging.getLogger("httpx")` em WARNING. É um requisito do
+  host, e o host de referência já o cumpre: a sua configuração de logging de produção
+  fixa o `httpx` em WARNING entre os tectos por pacote.
 - **INFO em `event=outbound_markup`, e é a segunda excepção declarada** — esta à
   regra «INFO não é happy-path por request». A linha dispara em **todos** os
   envios e mesmo assim tem de ser INFO: a conversão de negrito por canal acontece
