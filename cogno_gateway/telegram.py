@@ -12,7 +12,9 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
+import re
 from typing import Any, Mapping, Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -42,18 +44,49 @@ _SECRET_HEADER = "x-telegram-bot-api-secret-token"
 _RETRY_BACKOFF_SECONDS = 0.5
 
 
-def _error_detail(exc: "httpx.HTTPError") -> str:
-    """The Telegram-reported reason for a failed send, not the opaque httpx status. On a 4xx,
-    ``raise_for_status`` raises ``HTTPStatusError`` whose ``response`` body carries Telegram's
-    ``{"ok": false, "description": "..."}`` (e.g. "chat not found", "can't parse entities …") —
-    surface that so a failure is diagnosable.
+#: What the bot token becomes wherever this module reports an error. The token sits in the PATH
+#: of every Bot API URL (``/bot<TOKEN>/sendMessage``), so masking the value turns that segment
+#: into ``/bot[token]/`` and leaves the rest of the text readable.
+_TOKEN_MASK = "[token]"
 
-    Transport errors have no response and no ``description``, and — measured — usually no message
+
+def _redact_token(text: str, token: str) -> str:
+    """``text`` with every occurrence of ``token`` replaced by ``[token]``: as written, and
+    percent-encoded. A Telegram token has one character a URL escapes, the ``:``, and a proxy that
+    echoes the path may write it ``%3A`` or ``%3a``. The match ignores case, so it can only mask
+    more, never less. An empty ``token`` masks nothing; the constructor refuses one."""
+    if not token:
+        return text
+    forms = sorted({token, quote(token, safe="")}, key=len, reverse=True)
+    return re.sub("|".join(re.escape(f) for f in forms), _TOKEN_MASK, text, flags=re.IGNORECASE)
+
+
+def _error_detail(exc: "httpx.HTTPError", token: str) -> str:
+    """The reason a send failed, for ``SendResult.error``, and never the bot token.
+
+    On a non-2xx, ``raise_for_status`` raises ``HTTPStatusError`` whose ``response`` body carries
+    Telegram's ``{"ok": false, "description": "..."}`` (e.g. "chat not found", "can't parse
+    entities …"); surface that so a failure is diagnosable. A body that is not JSON is surfaced as
+    its text.
+
+    An answer with NO body (a redirect, a proxy's 5xx) has nothing of Telegram's to say, and the
+    exception's own text is the one thing that must not stand in for it: httpx writes the request
+    URL into it (``Server error '502 Bad Gateway' for url 'https://api.telegram.org/bot<TOKEN>/…'``),
+    and the token is in that URL. Measured with a planted token on 0.1.2: a 502 and a 302 with no
+    body, and a 500 whose HTML echoed the URL, each put the token into this field and into the
+    ``send_failed`` log line. So a bodiless answer reads ``<status> <ExceptionClass>``
+    (``502 HTTPStatusError``), which is the whole diagnosis it has.
+
+    Transport errors have no response and no ``description``, and (measured) usually no message
     either: httpx maps httpcore's timeout to ``ReadTimeout(str(inner))`` and that inner exception
-    is a bare ``TimeoutError``, so ``str(exc)`` is ``""``. The line then read ``error=`` and a read
-    timeout was **indistinguishable from no error at all**. Fall back to the exception CLASS, which
+    is a bare ``TimeoutError``, so ``str(exc)`` is ``""``. Fall back to the exception CLASS, which
     is the whole diagnosis for this family: ``ReadTimeout`` says the request went out and no answer
-    came back, ``ConnectError`` says it never left. Never the empty string."""
+    came back, ``ConnectError`` says it never left. Never the empty string. A message that is not
+    empty is kept: the address-family walk names the families it tried there (``cogno_gateway.net``).
+
+    Every text that comes from outside (the description, the body, the transport message) goes
+    through :func:`_redact_token`. A body can echo the URL, and nothing here proves that a transport
+    message never will."""
     resp = getattr(exc, "response", None)
     if resp is not None:
         try:
@@ -62,8 +95,15 @@ def _error_detail(exc: "httpx.HTTPError") -> str:
             desc = None
         detail = desc or (resp.text or "").strip()
         if detail:
-            return f"{resp.status_code} {detail}"
-    return str(exc) or type(exc).__name__
+            return f"{resp.status_code} {_redact_token(str(detail), token)}"
+        return f"{resp.status_code} {type(exc).__name__}"
+    return _redact_token(str(exc), token) or type(exc).__name__
+
+
+def _log_status(exc: BaseException) -> str:
+    """The HTTP status of a failed call, for a log line: ``none`` when no answer came back."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return "none" if status is None else str(status)
 
 
 def _is_transport_error(exc: BaseException) -> bool:
@@ -139,8 +179,9 @@ class TelegramChannel:
                 raise
             # WARNING, not DEBUG: a retry is a handled/recovered condition (LOGGING.md), and it
             # is the only record that this reply may now exist twice on the contact's phone.
+            # The CLASS only, never ``str(exc)``: a log line carries no text the exception wrote.
             logger.warning("channel=telegram event=send_retry attempt=2 after=%s",
-                           _error_detail(exc))
+                           type(exc).__name__)
         await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
         return await _post_once(client, url, **kwargs)
 
@@ -307,9 +348,13 @@ class TelegramChannel:
                                                   "document": m.url or m.ref})
                     ids.append(str(resp.json().get("result", {}).get("message_id", "")))
             except httpx.HTTPError as exc:
-                detail = _error_detail(exc)
-                logger.warning("channel=telegram event=send_failed sent=%d error=%s", len(ids),
-                               detail)
-                return SendResult(ok=False, message_ids=ids, error=detail)
+                # The log line names what happened by CLASS and STATUS only, never by text the
+                # exception or the provider wrote: ``str(exc)`` carried the bot token (see
+                # ``_error_detail``). Telegram's own wording goes to the host in
+                # ``SendResult.error``, with the token masked.
+                logger.warning("channel=telegram event=send_failed sent=%d error=%s status=%s",
+                               len(ids), type(exc).__name__, _log_status(exc))
+                return SendResult(ok=False, message_ids=ids,
+                                  error=_error_detail(exc, self._token))
         logger.debug("channel=telegram event=message_sent chunks=%d ok=true", len(ids))
         return SendResult(ok=True, message_ids=ids)

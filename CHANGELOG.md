@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.1.3 — 2026-10-23
+
+### Fixed
+- **A failed Telegram send no longer reports the bot token, in the log or in `SendResult.error`.**
+  The token is in the path of every Bot API URL (`/bot<TOKEN>/sendMessage`), and httpx writes the
+  request URL into the text of the `HTTPStatusError` that `raise_for_status` raises. For an answer
+  with no body (a redirect, a proxy's 5xx) `_error_detail` fell back to that text, and the
+  `event=send_failed` WARNING line logged it. Measured on 0.1.2 with a planted token over real
+  httpx (`MockTransport`): a 502 and a 302 with no body, and a 500 whose HTML echoed the URL, each
+  put the token into `SendResult.error` and into the log; Telegram's JSON description did not.
+  - `event=send_failed` now reads `sent=<n> error=<ExceptionClass> status=<code|none>` and carries
+    nothing the exception or the provider wrote. `event=send_retry` reads `after=<ExceptionClass>`.
+  - `SendResult.error` for an answer with no body is `<status> <ExceptionClass>`
+    (`502 HTTPStatusError`), never the exception's text.
+  - Every text that does reach `SendResult.error` (Telegram's description, a non-JSON body, a
+    transport error's message) has the token masked as `[token]`, as written and percent-encoded
+    in either case, so `/bot<TOKEN>/` reads `/bot[token]/`. An error text with no token in it is
+    kept byte for byte, including a description that says "bot".
+  - `tests/unit/test_telegram_send_error_carries_no_token.py` is the sentinel: a planted token over
+    real httpx, and no 6-character window of it in any record the package logs or in
+    `SendResult.error`, across seven failing shapes and all four Bot API calls a send makes, each
+    proving first that the token was in the failing request's URL. Its controls keep a description,
+    a description naming the bot, a plain-text body and a read timeout whole.
+
+### Not in this release
+- `fetch_media` still lets the `HTTPStatusError` of `getFile` or of the download propagate, and its
+  text carries the URL with the token. Changing what it raises changes what a host catches, so it
+  is left to its own change; a host that logs that exception's text logs the token.
+- httpx's own `httpx` logger writes every request URL, token included, at INFO. That logger is the
+  host's to configure (`LOGGING.md`).
+
 ## 0.1.2 — 2026-10-21
 
 ### Fixed
