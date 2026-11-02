@@ -261,6 +261,16 @@ def test_malformed_entities_never_raise_and_never_mention(entities):
     assert msg is not None and msg.mentions_bot is False
 
 
+def test_a_boolean_offset_is_not_an_offset_even_where_it_would_land_on_the_handle():
+    """``True == 1`` in Python. With a leading space, offset 1 IS where the handle starts, so the
+    only thing that keeps this from reading as a mention is refusing the bool."""
+    text = f" @{HANDLE} oi"
+    good = [{"type": "mention", "offset": 1, "length": _u16(f"@{HANDLE}")}]
+    assert _on().parse_inbound(_group_msg(text, entities=good)).mentions_bot is True  # control
+    bad = [{"type": "mention", "offset": True, "length": _u16(f"@{HANDLE}")}]
+    assert _on().parse_inbound(_group_msg(text, entities=bad)).mentions_bot is False
+
+
 # ── replies to the bot ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("replied,expected", [

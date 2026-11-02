@@ -169,11 +169,17 @@ class InboundMessage:
     reply_to: str = ""                 # quoted/replied-to text, if any
     raw: dict = field(default_factory=dict)
 
-    # ── Group chats: WHERE to answer vs WHO spoke. RESERVED — no adapter fills them yet. ──
-    # Every adapter still DROPS group traffic at parse (Telegram `_is_group`, Evolution `@g.us`),
-    # so a message that reaches a host is a 1:1 message and these keep their defaults, which ARE
-    # the 1:1 case. They are keyword-only and left out of ``repr`` while at their default (see
-    # ``__repr__``), so a 1:1 message constructs, compares, matches and prints exactly as before.
+    # ── Group chats: WHERE to answer vs WHO spoke. ──
+    # Only Telegram fills them, and only when the host opted in (``ChannelConfig.accept_groups``,
+    # since 0.1.4). Otherwise every adapter DROPS group traffic at parse (Telegram `_is_group`,
+    # Evolution `@g.us`, Cloud `group_id`), and a message that reaches a host is a 1:1 message
+    # whose fields keep their defaults, which ARE the 1:1 case. They are keyword-only and left
+    # out of ``repr`` while at their default (see ``__repr__``), so a 1:1 message constructs,
+    # compares, matches and prints exactly as before.
+    #
+    # In a Telegram group ``sender`` is the ROOM (the same value as ``conversation_id``), never
+    # the member: Telegram numbers messages per chat, so a host that deduplicates on
+    # ``(sender, message_id)`` stays correct, and a reply sent to ``sender`` goes to the room.
     conversation_id: str = field(default="", kw_only=True)
     #   where a reply goes: the group JID (`…@g.us`) or the negative Telegram chat id.
     #   "" = the sender's own 1:1 chat, i.e. reply to ``sender`` as today.
@@ -221,6 +227,11 @@ class OutboundMessage:
     buttons: list["Button"] = field(default_factory=list)   # quick-replies (≤3) under the text
     list_menu: Optional["ListMenu"] = None  # a menu of >3 options (WhatsApp list / TG keyboard)
     template: Optional["Template"] = None   # proactive send outside the 24h window
+    # The provider id of the inbound message this reply answers. Telegram threads the FIRST text
+    # chunk to it (``reply_parameters``), so a room sees whom the bot is answering; a value that
+    # is not a positive integer is ignored. "" (the default) sends exactly as before. Other
+    # adapters ignore it.
+    reply_to_message_id: str = ""
 
 
 @dataclass
@@ -243,6 +254,14 @@ class ChannelConfig:
     # let a dead address spend a whole request.
     timeout: float = 15.0
     extra: dict = field(default_factory=dict)
+    # ── Group chats (Telegram only, since 0.1.4). OFF by default, and off is exactly 0.1.3. ──
+    # With ``accept_groups`` False every group shape drops at parse, unconditionally. True lets a
+    # group ``message`` through with the group fields of ``InboundMessage`` filled; whether a
+    # room may reach a turn at all (registered, enabled, which trigger) is the HOST's decision.
+    accept_groups: bool = False
+    # The bot's ``@handle`` (``getMe``), with or without the ``@``; any case. It is what an
+    # ``@mention`` is compared with. Empty → no message ever reads as mentioning the bot.
+    bot_username: str = ""
 
 
 @dataclass

@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.1.4 — 2026-11-02
+
+### Added
+- **Telegram group chats, opt-in: `ChannelConfig.accept_groups` (default `False`) and
+  `ChannelConfig.bot_username`.** With the switch off, every group shape drops at parse exactly as
+  in 0.1.3, unconditionally. On, a `group`/`supergroup` `message` parses with the five group fields
+  of `InboundMessage` filled:
+  - `sender` and `conversation_id` are the ROOM's `chat.id`, and `author` is the member's
+    `from.id`. `sender` stays the room on purpose: Telegram numbers messages PER CHAT, so a host
+    that deduplicates on `(sender, message_id)` would otherwise drop the same member's message 57
+    in a second room as a duplicate of the first. It also keeps a reply sent to `sender` in the room;
+  - `author_is_bot` is `from.is_bot`. Telegram can deliver another bot's messages to a bot whose
+    privacy mode is off or that is an admin ("Bot-to-Bot Communication",
+    https://core.telegram.org/bots/features, read 2026-11-02);
+  - `mentions_bot` is read from `entities` (or `caption_entities` on media). A `mention` counts
+    when its text is `@<bot_username>` (any case, with or without the configured `@`), a
+    `text_mention` when its user is this bot, and a `bot_command` when it is addressed
+    `/<cmd>@<bot_username>`. **Offsets and lengths are UTF-16 code units**, the Bot API's unit, so a
+    mention after an emoji outside the BMP is found where a code-point slice would miss it. The text
+    alone is never read: the handle inside a URL carries no entity and is no mention. A malformed
+    entity is skipped, never raised, and a `bool` is not an offset. No `bot_username` → never a mention;
+  - `reply_to_bot` is true when `reply_to_message.from` is this bot: by the id in the token's
+    prefix (`<bot id>:<secret>`), or, for a token without one, by the handle on a user Telegram
+    marks `is_bot`, so a person whose username equals the handle is not the bot.
+- **Still dropped with the switch on:**
+  - a group button tap or reaction (Phase 1 sends no buttons to a room);
+  - a message posted on behalf of a chat (`sender_chat`: an anonymous admin, a linked channel's post);
+  - a message with no `from`;
+  - a forum supergroup (`is_forum`), whose topics a reply would have to address.
+- **`OutboundMessage.reply_to_message_id`** (default `""`). Telegram threads the FIRST text chunk
+  to it (`reply_parameters`, with `allow_sending_without_reply`), so a room sees whom the bot
+  answers. A value that is not a positive integer sends exactly as before, and the other adapters
+  ignore the field.
+
+### Unchanged
+- Evolution (`@g.us`) and WhatsApp Cloud (`group_id`) still drop every group message. The 1:1
+  parse of every adapter is the same with the switch on or off: same `repr` (the twins in
+  `tests/unit/test_telegram_group_parse.py`, beside the 1:1 corpus digests of
+  `tests/unit/test_inbound_group_fields.py`, taken on `3ff003b`, which still hold).
+- No new log line.
+
+### Not in this release
+- Which rooms may reach a turn, which trigger counts and who may speak are the HOST's decisions;
+  this library only parses. A host moves its pin to read the fields.
+- `my_chat_member`, which would let a host discover the rooms the bot is put in, is not added to
+  `_ALLOWED_UPDATES`, so no bot has to re-register its webhook.
+
 ## 0.1.3 — 2026-10-23
 
 ### Fixed

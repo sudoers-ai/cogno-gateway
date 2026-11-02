@@ -2,9 +2,10 @@
 
 A group chat separates two things a 1:1 chat keeps together: WHERE a reply goes (the group) and
 WHO spoke (one member). ``InboundMessage`` had only ``sender`` for both, so the model gained
-``conversation_id``, ``author``, ``mentions_bot``, ``reply_to_bot`` and ``author_is_bot``. Nothing
-fills them yet, and every adapter still DROPS group traffic at parse, so the only messages a host
-can receive are 1:1 messages — and for those this file proves the change is invisible:
+``conversation_id``, ``author``, ``mentions_bot``, ``reply_to_bot`` and ``author_is_bot``. With
+the adapters' DEFAULT config nothing fills them and every adapter DROPS group traffic at parse, so
+the only messages a host can receive are 1:1 messages — and for those this file proves the change
+is invisible (the opt-in Telegram path of 0.1.4 is ``test_telegram_group_parse.py``):
 
 * **the representation** — every message the four adapters parse out of a fixed 1:1 corpus prints
   byte for byte as it did on the tree before the fields (``_BASE_REPR``, digests taken there);
@@ -236,6 +237,8 @@ def test_asdict_gains_the_five_reserved_keys_at_their_default_and_nothing_else(l
 
 @pytest.mark.parametrize("label", sorted(CORPUS))
 def test_no_adapter_fills_a_group_field_yet(label):
+    # With the adapters' DEFAULT config. Since 0.1.4 Telegram fills them when the host opts in
+    # (`ChannelConfig.accept_groups`) — that path is `test_telegram_group_parse.py`.
     msg = _parse(label)
     assert {name: getattr(msg, name) for name in GROUP_FIELDS} == DEFAULTS
 
