@@ -116,7 +116,11 @@ class WhatsAppProvisioner(Protocol):
     """
 
     async def connect(self, account: str, *, force: bool = False) -> WhatsAppConnection: ...
+    # ``status`` may WRITE (the Evolution adapter heals a stale return address on the provider);
+    # ``probe`` is the same reading and never writes — the one a safe request (an HTTP GET)
+    # calls.
     async def status(self, account: str) -> WhatsAppStatus: ...
+    async def probe(self, account: str) -> WhatsAppStatus: ...
     async def disconnect(self, account: str) -> bool: ...
     # The channel credentials for this account's instance — the field names of
     # :class:`cogno_gateway.types.ChannelConfig` (``token``/``base_url``/``instance``/
@@ -152,6 +156,10 @@ class InMemoryWhatsAppProvisioner:
     async def status(self, account: str) -> WhatsAppStatus:
         return WhatsAppStatus(state=self._state.get(account, "close"),
                               instance=self._instance(account))
+
+    async def probe(self, account: str) -> WhatsAppStatus:
+        """Read-only status. The stub has no return address to heal, so it IS :meth:`status`."""
+        return await self.status(account)
 
     async def disconnect(self, account: str) -> bool:
         return self._state.pop(account, None) is not None
@@ -275,7 +283,12 @@ class EvolutionWhatsAppProvisioner:
                            self._webhook_base, type(exc).__name__)
             return False
 
-    async def status(self, account: str) -> WhatsAppStatus:
+    async def _inspect(self, account: str) -> "tuple[WhatsAppStatus, str]":
+        """READS only: the connection state and where the provider will deliver, compared with
+        where the caller listens. Returns ``(status, expected_url)``; ``expected_url`` is ``""``
+        when there is nothing a heal could do (no ``webhook_base``, or the probe failed). One
+        definition, read by :meth:`probe` and by :meth:`status`, so the two cannot disagree
+        about what counts as stale."""
         instance = self._instance(account)
         resp = await self._request("GET", f"/instance/connectionState/{instance}")
         data = resp.json() if resp.status_code < 300 else {}
@@ -283,7 +296,7 @@ class EvolutionWhatsAppProvisioner:
                  or data.get("state") or "close")
         # WhatsAppStatus is frozen — build the final value, never mutate a draft.
         if not self._webhook_base:
-            return WhatsAppStatus(state=state, instance=instance)
+            return WhatsAppStatus(state=state, instance=instance), ""
         # Ask the PROVIDER where it will deliver, and compare with where we listen. Reading our
         # own store instead would be a mirror: it held the right URL all along while Evolution
         # held a stale one, and the dashboard showed green while the contact's replies went
@@ -296,7 +309,7 @@ class EvolutionWhatsAppProvisioner:
         except Exception as exc:  # noqa: BLE001 — a probe must never break the status call
             logger.warning("event=webhook_probe_failed instance=%s error=%s",
                            instance, type(exc).__name__)
-            return WhatsAppStatus(state=state, instance=instance)
+            return WhatsAppStatus(state=state, instance=instance), ""
 
         # Staleness is URL *or* auth header: a re-register that kept the URL but dropped
         # ``headers.apikey`` (a pre-fix operator script did exactly that) leaves a webhook whose
@@ -306,13 +319,31 @@ class EvolutionWhatsAppProvisioner:
                      or (record.get("headers") or {}).get("apikey", "") == self._webhook_secret)
         if actual == expected and header_ok:
             return WhatsAppStatus(state=state, instance=instance,
-                                  webhook_url=actual, webhook_ok=True)
+                                  webhook_url=actual, webhook_ok=True), expected
 
         logger.warning("event=webhook_stale instance=%s reason=%s actual=%s expected=%s",
                        instance, "url" if actual != expected else "auth_header",
                        actual, expected)
-        stale = WhatsAppStatus(state=state, instance=instance,
-                               webhook_url=actual, webhook_ok=False)
+        return WhatsAppStatus(state=state, instance=instance,
+                              webhook_url=actual, webhook_ok=False), expected
+
+    async def probe(self, account: str) -> WhatsAppStatus:
+        """The status, READ-ONLY: the same comparison :meth:`status` makes, never the write.
+
+        For a caller whose request must not change anything — an HTTP ``GET`` a dashboard
+        polls, which proxies, prefetchers and retries are all entitled to repeat. A stale
+        address comes back ``webhook_ok=False, auto_healed=False`` and stays stale; the caller
+        heals it with :meth:`status` on a request that is allowed to write."""
+        st, _expected = await self._inspect(account)
+        return st
+
+    async def status(self, account: str) -> WhatsAppStatus:
+        """:meth:`probe`, then — on a stale address, behind a live public URL — the heal: a
+        ``POST /webhook/set/{instance}`` on the provider. This call WRITES to a third party."""
+        stale, expected = await self._inspect(account)
+        if stale.webhook_ok or not expected:
+            return stale
+        instance = stale.instance
         if not await self._webhook_base_is_live():
             logger.warning("event=webhook_heal_skipped instance=%s reason=base_unreachable",
                            instance)
@@ -324,7 +355,7 @@ class EvolutionWhatsAppProvisioner:
             logger.warning("event=webhook_heal_failed instance=%s error=%s",
                            instance, type(exc).__name__)
             return stale
-        return WhatsAppStatus(state=state, instance=instance, webhook_url=expected,
+        return WhatsAppStatus(state=stale.state, instance=instance, webhook_url=expected,
                               webhook_ok=True, auto_healed=True)
 
     async def disconnect(self, account: str) -> bool:

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.5 — 2026-11-02
+
+### Added
+- **`probe(account)` on `EvolutionWhatsAppProvisioner`, `InMemoryWhatsAppProvisioner` and the
+  `WhatsAppProvisioner` Protocol: the status, READ-ONLY.** `status()` heals a stale return address
+  with `POST /webhook/set/{instance}`, a write on the provider, so a caller answering an HTTP `GET`
+  (a dashboard polls one) had no way to ask without writing. `probe()` makes the same two reads
+  (`connectionState`, `webhook/find`) and the same comparison (URL, and `headers.apikey` when a
+  secret is set), logs `event=webhook_stale` the same way, and stops there: it does not ask
+  whether the public URL is alive, because that question only gates a write. The stub has nothing
+  to heal, so its `probe()` is its `status()`.
+
+### Unchanged
+- `status()` answers exactly as in 0.1.4. The two share one private reading (`_inspect`), so they
+  cannot disagree about what counts as stale: wherever `status()` does not write (the address is
+  right, there is no `webhook_base`, the probe failed, the public URL is dead) the two return
+  equal values, pinned in `tests/unit/test_provisioning.py`.
+
 ## 0.1.4 — 2026-11-02
 
 ### Added

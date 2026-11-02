@@ -102,7 +102,8 @@ prov = EvolutionWhatsAppProvisioner(
     webhook_path_template="/webhook/whatsapp_evo-{account}")
 
 conn = await prov.connect("acct-42")          # → WhatsAppConnection(qrcode_base64=…, status=…)
-st   = await prov.status("acct-42")           # → WhatsAppStatus(state="open", webhook_ok=…)
+st   = await prov.probe("acct-42")            # → WhatsAppStatus(state="open", webhook_ok=…) — reads only
+st   = await prov.status("acct-42")           # → the same reading, and a heal when it is stale — WRITES
 cfg  = ChannelConfig(**prov.channel_credentials("acct-42"))   # → a send-capable EvolutionChannel
 ```
 
@@ -114,8 +115,12 @@ rather than as assumptions baked in here. The defaults are the identity mapping.
 instance sits at `"open"` while every inbound message is delivered to a dead URL. It asks the
 *provider* where it will deliver (never our own store — that held the right URL all along), and
 re-points it when it is stale, but **only after proving your public URL answers** — an unguarded
-heal during an outage rewrites every account's webhook to a dead address. `InMemoryWhatsAppProvisioner`
-is the deterministic stub for dev/tests.
+heal during an outage rewrites every account's webhook to a dead address. That heal is a write on
+the provider, so `status()` is not for a request that must not change anything. **`probe()` (since
+0.1.5) is the same reading without the write**: a stale address comes back `webhook_ok=False,
+auto_healed=False` and stays stale. Answer an HTTP `GET` with `probe()` and heal on a request that
+may write (a `POST`, a scheduled sweep) with `status()`. `InMemoryWhatsAppProvisioner` is the
+deterministic stub for dev/tests; it has nothing to heal, so its `probe()` is its `status()`.
 
 ## Registering a Telegram bot's webhook
 

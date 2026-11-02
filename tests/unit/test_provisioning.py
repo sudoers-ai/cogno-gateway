@@ -420,6 +420,85 @@ async def test_status_accepts_a_matching_auth_header_without_rewriting():
     assert not _webhook_set_bodies(http)
 
 
+# ── probe(): the same reading, never the write ─────────────────────────────────────────────
+#
+# ``status()`` heals, so a caller whose request must not change anything (an HTTP GET a
+# dashboard polls) had no way to ask without writing to the provider. ``probe()`` is that
+# question. The pairs below drive the SAME stale address through both: ``probe`` writes
+# nothing and reports it stale; ``status`` writes once and reports it healed.
+
+def _writes(http):
+    return [c for c in http.calls if c[0] != "GET"]
+
+
+async def test_probe_reports_a_stale_return_address_and_writes_nothing():
+    http, prov = _evo({**_OPEN, **_STALE, **_LIVE_BASE,
+                       ("POST", "/webhook/set/app_acct"): _Resp(200, {})},
+                      webhook_base="https://host.test")
+    st = await prov.probe("acct")
+    assert st.state == "open" and st.webhook_ok is False and st.auto_healed is False
+    assert st.webhook_url == "https://DEAD.tunnel/webhook/whatsapp_evo-acct"
+    assert _writes(http) == []
+    # it does not even ask whether our own URL is alive: that question exists only to gate a write
+    assert not any("/health" in c[1] for c in http.calls)
+
+
+async def test_twin_status_on_the_same_stale_address_writes_once():
+    http, prov = _evo({**_OPEN, **_STALE, **_LIVE_BASE,
+                       ("POST", "/webhook/set/app_acct"): _Resp(200, {})},
+                      webhook_base="https://host.test")
+    st = await prov.status("acct")
+    assert st.auto_healed is True
+    assert [c[0] for c in _writes(http)] == ["POST"]
+
+
+async def test_probe_flags_a_dropped_auth_header_without_rewriting_it():
+    http, prov = _evo({**_OPEN, **_LIVE_BASE,
+                       ("GET", "/webhook/find/app_acct"): _Resp(200, {
+                           "url": "https://host.test/webhook/whatsapp_evo-acct",
+                           "headers": {"apikey": ""}})},
+                      webhook_base="https://host.test", webhook_secret="s3cret")
+    st = await prov.probe("acct")
+    assert st.webhook_ok is False and st.auto_healed is False and _writes(http) == []
+
+
+@pytest.mark.parametrize("case", ["correct", "no_base", "probe_fails", "stale_dead_base"])
+async def test_control_probe_and_status_agree_whenever_status_does_not_write(case):
+    """Where ``status`` has nothing to heal, or may not heal, the two answers are the SAME
+    object, field by field — ``probe`` is ``status`` minus the write, not a second rule."""
+    class _Boom(_FakeHttp):
+        async def request(self, method, url, *, json=None, headers=None):
+            if case == "probe_fails" and "/webhook/find/" in url:
+                raise RuntimeError("evolution down")
+            return await super().request(method, url, json=json, headers=headers)
+
+    routes = dict(_OPEN)
+    if case == "correct":
+        routes[("GET", "/webhook/find/app_acct")] = _Resp(
+            200, {"url": "https://host.test/webhook/whatsapp_evo-acct"})
+    if case == "stale_dead_base":
+        routes.update(_STALE)                         # no _LIVE_BASE → the heal is skipped
+    base = "" if case == "no_base" else "https://host.test"
+
+    def _prov():
+        http = _Boom(routes)
+        return http, EvolutionWhatsAppProvisioner(
+            base_url="https://evo.test", api_key="k", webhook_base=base, client=http,
+            instance_template=INSTANCE_T, webhook_path_template=WEBHOOK_T)
+
+    h1, p1 = _prov()
+    h2, p2 = _prov()
+    assert await p1.probe("acct") == await p2.status("acct")
+    assert _writes(h1) == [] == _writes(h2)
+
+
+async def test_the_in_memory_stub_probes_what_it_reports():
+    prov = InMemoryWhatsAppProvisioner(instance_template=INSTANCE_T)
+    await prov.connect("acct")
+    assert await prov.probe("acct") == await prov.status("acct")
+    assert isinstance(prov, WhatsAppProvisioner)
+
+
 async def test_disconnect_reports_the_provider_verdict():
     http, prov = _evo({("DELETE", "/instance/delete/app_acct"): _Resp(200, {})})
     assert await prov.disconnect("acct") is True
