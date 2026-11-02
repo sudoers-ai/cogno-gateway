@@ -126,6 +126,28 @@ async def _post_once(client: "httpx.AsyncClient", url: str, **kwargs: Any) -> "h
     return resp
 
 
+def _utf16_slice(units: bytes, offset: Any, length: Any) -> Optional[str]:
+    """The text an entity covers, from the UTF-16-LE bytes of the message; ``None`` when the
+    offset or length is not a non-negative integer (a ``bool`` is not one) or runs past the end."""
+    if isinstance(offset, bool) or isinstance(length, bool):
+        return None
+    if not isinstance(offset, int) or not isinstance(length, int):
+        return None
+    if offset < 0 or length <= 0 or 2 * (offset + length) > len(units):
+        return None
+    return units[2 * offset: 2 * (offset + length)].decode("utf-16-le", errors="replace")
+
+
+def _reply_id(value: str) -> Optional[int]:
+    """``OutboundMessage.reply_to_message_id`` as the positive integer Telegram wants, or ``None``
+    (empty, not numeric, zero, negative) — and then the send is the send of before."""
+    raw = (value or "").strip()
+    if not raw.isdigit():
+        return None
+    number = int(raw)
+    return number if number > 0 else None
+
+
 class TelegramChannel:
     name = "telegram"
 
@@ -134,6 +156,12 @@ class TelegramChannel:
             raise GatewayError("TelegramChannel requires config.token (bot token)")
         self._cfg = config
         self._token = config.token
+        # Group chats (0.1.4): who THIS bot is, read once. The id is the token's prefix before the
+        # ``:`` (Telegram tokens are ``<bot id>:<secret>``), so a reply to the bot needs no call;
+        # a token without a numeric prefix leaves it ``None`` and the handle answers instead.
+        prefix = config.token.split(":", 1)[0]
+        self._bot_id: Optional[int] = int(prefix) if prefix.isdigit() else None
+        self._bot_handle = (config.bot_username or "").strip().lstrip("@").lower()
         if not config.secret:
             logger.warning("channel=telegram event=verify_open reason=no_secret_configured")
 
@@ -213,10 +241,11 @@ class TelegramChannel:
 
     @staticmethod
     def _is_group(chat: dict) -> bool:
-        """Cogno is 1:1 by design (WhatsApp drops ``@g.us`` at parse — this is the Telegram
-        mirror). Without it the only guard is BotFather's privacy mode, an external toggle:
-        a @mention delivered from a group would run a turn keyed by the GROUP chat id — one
-        shared auto-GUEST session/memory for every member. Drop group traffic in code."""
+        """Is this chat a group? Group traffic drops at parse unless the host opted in
+        (``ChannelConfig.accept_groups``). Without the drop the only guard was BotFather's
+        privacy mode, an external toggle: a @mention delivered from a group ran a turn keyed by
+        the GROUP chat id — one shared auto-GUEST session/memory for every member. A button tap
+        and a reaction in a group drop whatever the switch says (Phase 1 sends no buttons)."""
         return chat.get("type") in ("group", "supergroup")
 
     def _parse_callback(self, callback: dict) -> Optional[InboundMessage]:
@@ -246,8 +275,14 @@ class TelegramChannel:
 
     def _parse_message(self, message: dict) -> Optional[InboundMessage]:
         chat = message.get("chat", {})
+        group: dict = {}
         if self._is_group(chat):
-            return None  # 1:1 only — see _is_group
+            if not self._cfg.accept_groups:
+                return None  # 1:1 only unless the host opted in — see _is_group
+            fields = self._group_fields(message, chat)
+            if fields is None:
+                return None
+            group = fields
         sender = str(chat.get("id", ""))
         message_id = str(message.get("message_id", ""))
         reply_to = (message.get("reply_to_message", {}) or {}).get("text", "") or ""
@@ -256,7 +291,7 @@ class TelegramChannel:
                media: Optional[MediaRef] = None) -> InboundMessage:
             return InboundMessage(channel=self.name, sender=sender, kind=kind,
                                   message_id=message_id, text=text, media=media,
-                                  reply_to=reply_to, raw=message)
+                                  reply_to=reply_to, raw=message, **group)
 
         if message.get("text"):
             return mk(MessageKind.TEXT, text=message["text"])
@@ -275,6 +310,82 @@ class TelegramChannel:
                       media=MediaRef(ref=d.get("file_id", ""), mime=d.get("mime_type", ""),
                                      filename=d.get("file_name", "")))
         return mk(MessageKind.UNKNOWN)
+
+    # ── group chats (0.1.4): the room, the author, and whether the bot was called ──────
+    def _group_fields(self, message: dict, chat: dict) -> Optional[dict]:
+        """The group fields of a group ``message``, or ``None`` when it must drop.
+
+        ``sender`` stays the ROOM's ``chat.id`` (set by the caller) and ``conversation_id`` is
+        the same value; ``author`` is the member. Drops: a message posted on behalf of a chat
+        (``sender_chat`` — an anonymous admin, a post forwarded from a linked channel), which no
+        person's identity can answer for; one with no ``from``; and a forum supergroup
+        (``is_forum``), whose topics a reply would have to address and Phase 1 does not."""
+        sender = message.get("from")
+        if (message.get("sender_chat") is not None or not isinstance(sender, dict)
+                or chat.get("is_forum") is True):
+            return None
+        author = sender.get("id")
+        if isinstance(author, bool) or not isinstance(author, (int, str)) or str(author) == "":
+            return None
+        if "text" in message:
+            text, entities = message.get("text"), message.get("entities")
+        else:
+            text, entities = message.get("caption"), message.get("caption_entities")
+        return {
+            "conversation_id": str(chat.get("id", "")),
+            "author": str(author),
+            "author_is_bot": sender.get("is_bot") is True,
+            "mentions_bot": self._mentions_bot(text, entities),
+            "reply_to_bot": self._is_this_bot(
+                (message.get("reply_to_message") or {}).get("from")),
+        }
+
+    def _is_this_bot(self, user: Any) -> bool:
+        """Is ``user`` (a Bot API ``User``) this bot? By id when the token carries one; by the
+        handle otherwise — and then only a user Telegram marks ``is_bot``, so a PERSON whose
+        username happens to equal the handle is never read as the bot."""
+        if not isinstance(user, dict):
+            return False
+        uid = user.get("id")
+        if self._bot_id is not None:
+            return not isinstance(uid, bool) and uid == self._bot_id
+        username = user.get("username")
+        return (bool(self._bot_handle) and user.get("is_bot") is True
+                and isinstance(username, str) and username.lower() == self._bot_handle)
+
+    def _mentions_bot(self, text: Any, entities: Any) -> bool:
+        """Does an entity of ``text`` call THIS bot? Three kinds count: a ``mention`` whose text
+        is ``@<handle>``, a ``text_mention`` of this bot's user, and a ``bot_command`` addressed
+        ``/<cmd>@<handle>``. The text alone is never read: the handle inside a URL carries no
+        entity, and is no mention.
+
+        Entity offsets and lengths are in **UTF-16 code units** (the Bot API's unit), not in
+        Python code points: an emoji outside the BMP before the mention shifts every later
+        offset by one per emoji. Anything malformed (not a list, not a dict, a non-integer or
+        out-of-range offset) is skipped — never raised."""
+        if not isinstance(text, str) or not isinstance(entities, list):
+            return False
+        units = text.encode("utf-16-le")
+        for ent in entities:
+            if not isinstance(ent, dict):
+                continue
+            kind = ent.get("type")
+            if kind == "text_mention":
+                if self._is_this_bot(ent.get("user")):
+                    return True
+                continue
+            if kind not in ("mention", "bot_command") or not self._bot_handle:
+                continue
+            piece = _utf16_slice(units, ent.get("offset"), ent.get("length"))
+            if piece is None:
+                continue
+            piece = piece.lower()
+            if kind == "mention" and piece == "@" + self._bot_handle:
+                return True
+            if kind == "bot_command" and "@" in piece \
+                    and piece.rsplit("@", 1)[1] == self._bot_handle:
+                return True
+        return False
 
     # ── fetch media (getFile → download) ──────────────────────────────
     async def fetch_media(self, ref: MediaRef) -> bytes:
@@ -328,8 +439,15 @@ class TelegramChannel:
                         [{"text": b.title, "callback_data": b.id}] for b in kb_buttons]}
                     if not chunks:
                         chunks = [text or " "]   # buttons need a message body
+                reply_to = _reply_id(message.reply_to_message_id)
                 for i, chunk in enumerate(chunks):
                     body: dict = {"chat_id": recipient, "text": chunk}
+                    if reply_to is not None and i == 0:
+                        # The FIRST chunk only: it is the one that says whom the bot answers.
+                        # ``allow_sending_without_reply`` so a deleted original never costs the
+                        # reply itself.
+                        body["reply_parameters"] = {"message_id": reply_to,
+                                                    "allow_sending_without_reply": True}
                     if markup and i == len(chunks) - 1:
                         body["reply_markup"] = markup
                     resp = await self._post(client, f"{_API}/bot{self._token}/sendMessage",

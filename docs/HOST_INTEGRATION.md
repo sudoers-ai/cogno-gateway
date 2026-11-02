@@ -56,11 +56,11 @@ reactions carry `emoji` + `target_message_id`; replies carry `reply_to`. A tappe
 quick-reply / list option / inline button arrives as `kind=INTERACTIVE` with
 `selection: ButtonReply(id, title)` — the `id` is the payload you sent.
 
-**Group chats: reserved fields, still dropped.** A message you receive is a 1:1 message: the
-Telegram adapter drops `group`/`supergroup` chats (message, button tap and reaction), the
-Evolution adapter drops `@g.us` (message and presence), and the WhatsApp Cloud adapter drops a
-message whose object carries a `group_id` (every kind; since 0.1.2). `InboundMessage` nevertheless carries the
-five fields a group will need, keyword-only and at the value that IS the 1:1 case:
+**Group chats: dropped unless you opt in, and only on Telegram.** By default a message you
+receive is a 1:1 message: the Telegram adapter drops `group`/`supergroup` chats (message, button
+tap and reaction), the Evolution adapter drops `@g.us` (message and presence), and the WhatsApp
+Cloud adapter drops a message whose object carries a `group_id` (every kind; since 0.1.2).
+`InboundMessage` carries five group fields, keyword-only and at the value that IS the 1:1 case:
 
 | field | default | means |
 |---|---|---|
@@ -70,9 +70,30 @@ five fields a group will need, keyword-only and at the value that IS the 1:1 cas
 | `reply_to_bot` | `False` | it replies to one of this bot's messages (only in a group) |
 | `author_is_bot` | `False` | the author is a bot |
 
-No adapter fills them yet, so a host that reads them reads the defaults. They stay out of `repr`
-while at their default; `dataclasses.asdict` does carry them (a dataclass field cannot leave it).
-`dataclasses.replace` carries them through, so normalising `sender` never loses the group.
+They stay out of `repr` while at their default; `dataclasses.asdict` does carry them (a dataclass
+field cannot leave it). `dataclasses.replace` carries them through, so normalising `sender` never
+loses the group.
+
+**Telegram fills them when you opt in (since 0.1.4).** Build the adapter with
+`ChannelConfig(accept_groups=True, bot_username="@your_bot")` (the handle from `getMe`, with or
+without the `@`, any case). The default, `False`, is 0.1.3 byte for byte. With it on, a group
+`message` arrives with:
+
+| field | value in a group |
+|---|---|
+| `sender` | the ROOM's `chat.id` (negative) — **not the member** |
+| `conversation_id` | the same room id |
+| `author` | the member's `from.id` (in a private chat with the bot, that is their `chat.id`) |
+| `author_is_bot` | `from.is_bot` — Telegram can deliver another bot's messages to a bot with privacy mode off |
+| `mentions_bot` | an entity calls THIS bot: `mention` `@your_bot`, `text_mention` of the bot's user, or `bot_command` `/cmd@your_bot`, read from `entities` or `caption_entities`. Offsets are UTF-16 code units. The text alone is never read. No `bot_username` → never |
+| `reply_to_bot` | `reply_to_message.from` is this bot: by the id in the token's prefix, or, when the token has none, by the handle on a user marked `is_bot` |
+
+`sender` is the room on purpose: Telegram numbers messages per chat, so deduplicating on
+`(sender, message_id)` stays correct, and a reply sent to `sender` goes to the room. Resolve the
+person from `author`. Still dropped with the switch on: a group button tap or reaction, a message
+posted on behalf of a chat (`sender_chat`: an anonymous admin, a linked channel's post), a message
+with no `from`, and a forum supergroup (`is_forum`). **What reaches a turn is yours to decide**:
+which rooms are registered, which trigger counts, who may speak. The adapter only parses.
 **WhatsApp Cloud marks a group only inside the message.** Meta delivers a reply in a group the
 business created through its Groups API under the same `messages` webhook field as a 1:1 message,
 with a `group_id` in the message object and `from` set to the participant. Until 0.1.2 the adapter
@@ -98,6 +119,13 @@ from cogno_gateway import Button                                                
 await channel.send(msg.sender, OutboundMessage(text="Confirmar agendamento?",
     buttons=[Button("confirm", "Sim ✅"), Button("cancel", "Não ❌")]))
 ```
+
+**Answering in a group (Telegram, 0.1.4):** send to `msg.sender` (the room) and set
+`reply_to_message_id=msg.message_id`. The first text chunk is threaded to that message
+(`reply_parameters`, with `allow_sending_without_reply`, so a deleted original never costs the
+reply), and the rest go out as before. A value that is not a positive integer is ignored, and
+the other adapters ignore the field. A button tapped in a group is dropped at parse, so a group
+reply should carry none.
 
 Buttons render natively per channel — Telegram inline keyboard, WhatsApp Cloud
 interactive buttons, Evolution `sendButtons`. The user's tap comes back as an

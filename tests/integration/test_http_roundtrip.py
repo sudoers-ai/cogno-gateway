@@ -127,3 +127,33 @@ async def test_evolution_fetch_media_base64_decodes(mock_http):
     assert data == b"AUDIOBYTES"
     assert rec.requests[0].url.path == "/chat/getBase64FromMediaMessage/inst1"
     assert rec.requests[0].headers["apikey"] == "APIKEY"
+
+
+# ── Telegram, a group reply (0.1.4) ──────────────────────────────────────
+async def test_telegram_group_reply_is_threaded_to_the_room_over_real_httpx(mock_http):
+    """The parse gives ``sender`` = the room; the reply sent there with ``reply_to_message_id``
+    serialises the room's negative id and ``reply_parameters`` through the real httpx layers.
+    Every id and handle is invented."""
+    from cogno_gateway import TelegramChannel
+
+    rec = mock_http(lambda req: httpx.Response(200, json={"ok": True,
+                                                         "result": {"message_id": 91}}))
+    ch = TelegramChannel(ChannelConfig(token="7000001:SEGREDO-INVENTADO", secret="s",
+                                       accept_groups=True, bot_username="@assistente_teste_bot"))
+    text = "@assistente_teste_bot que horas abre?"
+    inbound = ch.parse_inbound({"message": {
+        "message_id": 57, "text": text,
+        "chat": {"id": -1001234567890, "type": "supergroup"},
+        "from": {"id": 5550001, "is_bot": False},
+        "entities": [{"type": "mention", "offset": 0, "length": 21}]}})
+    assert inbound.mentions_bot is True and inbound.author == "5550001"
+
+    res = await ch.send(inbound.sender, OutboundMessage(text="Abre às 8h.",
+                                                        reply_to_message_id=inbound.message_id))
+
+    assert res.ok is True and res.message_ids == ["91"]
+    req = rec.requests[0]
+    assert req.url.path.endswith("/sendMessage")
+    assert json.loads(req.content) == {
+        "chat_id": "-1001234567890", "text": "Abre às 8h.",
+        "reply_parameters": {"message_id": 57, "allow_sending_without_reply": True}}

@@ -30,14 +30,20 @@ await tg.send(msg.sender, OutboundMessage(text="resposta"))   # auto-chunked
 
 `InboundMessage.kind` is a `MessageKind`: `TEXT · IMAGE · AUDIO · VIDEO · DOCUMENT · LOCATION · REACTION · STICKER · INTERACTIVE`. So a host handles **reactions** (emoji + target message id), **media** (a `MediaRef` resolved lazily via `fetch_media` — e.g. to feed audio to cogno-vox), **quick-reply buttons** (send `OutboundMessage(buttons=[Button(...)])`; the tap returns `kind=INTERACTIVE` with `selection.id`), replies, and plain text uniformly across channels.
 
-## 1:1 by design — group fields reserved, groups still dropped
+## 1:1 by default — groups only on Telegram, only when the host opts in
 
-Every adapter drops group traffic at parse (Telegram `group`/`supergroup`, Evolution `@g.us`,
-WhatsApp Cloud a message carrying a `group_id`), so a host only ever receives 1:1 messages.
-`InboundMessage` already carries the fields a group needs — `conversation_id` (where to answer),
-`author` (who spoke), `mentions_bot`, `reply_to_bot`, `author_is_bot` — keyword-only and at the
-1:1 default; **no adapter fills them yet**, and a 1:1 message prints and compares exactly as
-before. A Cloud `group_id` that names no group (absent, `null`, empty, blank) stays 1:1.
+By default every adapter drops group traffic at parse (Telegram `group`/`supergroup`, Evolution
+`@g.us`, WhatsApp Cloud a message carrying a `group_id`), so a host only receives 1:1 messages.
+`InboundMessage` carries the fields a group needs — `conversation_id` (where to answer), `author`
+(who spoke), `mentions_bot`, `reply_to_bot`, `author_is_bot` — keyword-only and at the 1:1
+default, so a 1:1 message prints and compares exactly as before. A Cloud `group_id` that names no
+group (absent, `null`, empty, blank) stays 1:1.
+
+**Telegram, since 0.1.4:** `ChannelConfig(accept_groups=True, bot_username="@your_bot")` lets a
+group message through with those fields filled — `sender` is the ROOM, `author` the member, and a
+mention is read from the message's entities in UTF-16 offsets. `OutboundMessage(reply_to_message_id=…)`
+threads the reply to the message that called the bot. Off (the default) is 0.1.3 byte for byte.
+See [`docs/HOST_INTEGRATION.md`](docs/HOST_INTEGRATION.md#2-receiving-inbound).
 
 ## Markup per channel, decided once
 
