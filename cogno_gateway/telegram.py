@@ -25,8 +25,11 @@ from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
     ChannelConfig,
+    MEMBERSHIP_JOINED,
+    MEMBERSHIP_LEFT,
     InboundMessage,
     MediaRef,
+    Membership,
     MessageKind,
     OutboundMessage,
     Reaction,
@@ -34,6 +37,11 @@ from cogno_gateway.types import (
 )
 
 logger = logging.getLogger("cogno_gateway.telegram")
+
+# THIS bot's own membership of a group (0.1.6), folded from a ``ChatMember`` status. ``creator``
+# is not here: a bot cannot own a group. ``restricted`` is decided by its ``is_member`` flag.
+_STATUS_JOINED = frozenset({"member", "administrator"})
+_STATUS_LEFT = frozenset({"left", "kicked"})
 
 _API = "https://api.telegram.org"
 _SECRET_HEADER = "x-telegram-bot-api-secret-token"
@@ -228,6 +236,9 @@ class TelegramChannel:
 
     # ── parse inbound ─────────────────────────────────────────────────
     def parse_inbound(self, payload: dict) -> Optional[InboundMessage]:
+        member = payload.get("my_chat_member")
+        if member:
+            return self._parse_my_chat_member(member)
         reaction = payload.get("message_reaction")
         if reaction:
             return self._parse_reaction(reaction)
@@ -279,6 +290,9 @@ class TelegramChannel:
         if self._is_group(chat):
             if not self._cfg.accept_groups:
                 return None  # 1:1 only unless the host opted in — see _is_group
+            status = self._service_membership(message)
+            if status is not None:
+                return self._membership(chat, status)
             fields = self._group_fields(message, chat)
             if fields is None:
                 return None
@@ -310,6 +324,57 @@ class TelegramChannel:
                       media=MediaRef(ref=d.get("file_id", ""), mime=d.get("mime_type", ""),
                                      filename=d.get("file_name", "")))
         return mk(MessageKind.UNKNOWN)
+
+    # ── group chats (0.1.6): THIS bot joined or left a room ─────────────────────────────
+    def _parse_my_chat_member(self, update: Any) -> Optional[InboundMessage]:
+        """``my_chat_member``: Telegram's own record that THIS bot's status in a chat changed.
+        It is the only event that reports a REMOVAL — a bot that was kicked receives no service
+        message in a room it is no longer in. Drops with the switch off, outside a group, in a
+        forum (whose topics Phase 1 cannot address), and when the member is not this bot."""
+        if not isinstance(update, dict):
+            return None
+        chat = update.get("chat") or {}
+        new = update.get("new_chat_member") or {}
+        if (not self._cfg.accept_groups or not isinstance(chat, dict) or not self._is_group(chat)
+                or chat.get("is_forum") is True or not isinstance(new, dict)
+                or not self._is_this_bot(new.get("user"))):
+            return None
+        status = new.get("status")
+        if status in _STATUS_JOINED or (status == "restricted" and new.get("is_member") is True):
+            return self._membership(chat, MEMBERSHIP_JOINED)
+        if status in _STATUS_LEFT or (status == "restricted" and new.get("is_member") is False):
+            return self._membership(chat, MEMBERSHIP_LEFT)
+        return None
+
+    def _service_membership(self, message: dict) -> Optional[str]:
+        """The service messages that say THIS bot joined or left, or ``None``. Every bot
+        receives service messages whatever its privacy mode (core.telegram.org/bots/features,
+        read 2026-11-02), so a join is seen even before a webhook subscribes to
+        ``my_chat_member``. ``group_chat_created``: the bot was among the group's first members.
+        A group upgraded to a supergroup gets a NEW chat id: ``migrate_from_chat_id`` arrives
+        in the new room (joined) and ``migrate_to_chat_id`` in the old one (left)."""
+        added = message.get("new_chat_members")
+        if isinstance(added, list) and any(self._is_this_bot(u) for u in added):
+            return MEMBERSHIP_JOINED
+        if self._is_this_bot(message.get("left_chat_member")):
+            return MEMBERSHIP_LEFT
+        if message.get("group_chat_created") is True or message.get("migrate_from_chat_id"):
+            return MEMBERSHIP_JOINED
+        if message.get("migrate_to_chat_id"):
+            return MEMBERSHIP_LEFT
+        return None
+
+    def _membership(self, chat: dict, status: str) -> Optional[InboundMessage]:
+        if chat.get("is_forum") is True:
+            return None
+        room = chat.get("id")
+        if isinstance(room, bool) or not isinstance(room, (int, str)) or str(room) == "":
+            return None
+        title = chat.get("title")
+        return InboundMessage(
+            channel=self.name, sender=str(room), kind=MessageKind.MEMBERSHIP,
+            conversation_id=str(room),
+            membership=Membership(status=status, title=title if isinstance(title, str) else ""))
 
     # ── group chats (0.1.4): the room, the author, and whether the bot was called ──────
     def _group_fields(self, message: dict, chat: dict) -> Optional[dict]:
@@ -388,6 +453,20 @@ class TelegramChannel:
         return False
 
     # ── fetch media (getFile → download) ──────────────────────────────
+    async def reads_all_group_messages(self, *, timeout: float = 3.0) -> Optional[bool]:
+        """``getMe``'s ``can_read_all_group_messages`` for THIS bot (0.1.6): ``False`` = privacy
+        mode ON (Telegram delivers only commands to the bot, replies to it and service
+        messages), ``True`` = off, ``None`` = unknown (any failure). One ``GET``, no retry, a
+        short timeout: a host asks it beside a room's registration, not on a turn."""
+        from cogno_gateway.telegram_provisioning import reads_all_of
+        try:
+            async with build_async_client(timeout=timeout) as client:
+                resp = await client.get(f"{_API}/bot{self._token}/getMe")
+            return reads_all_of(resp.json() if resp.status_code < 500 else {})
+        except Exception as exc:  # noqa: BLE001 — unknown, never a failure of the caller
+            logger.warning("channel=telegram event=getme_failed error=%s", type(exc).__name__)
+            return None
+
     async def fetch_media(self, ref: MediaRef) -> bytes:
         async with build_async_client(self._cfg) as client:
             r = await client.get(f"{_API}/bot{self._token}/getFile",

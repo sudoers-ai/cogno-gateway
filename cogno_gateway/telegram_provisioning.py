@@ -54,7 +54,23 @@ logger = logging.getLogger(__name__)
 # second writer in another language (the operator script that re-points webhooks after a tunnel
 # rotation is the usual one) silently changes which features work whenever the two lists drift.
 # Import this rather than re-typing the list.
-_ALLOWED_UPDATES = ["message", "edited_message", "callback_query", "message_reaction"]
+#
+# ``my_chat_member`` (0.1.6) is the one event that tells a host the bot was REMOVED from a group
+# (a kicked bot receives no service message there). A bot registered before 0.1.6 keeps the old
+# list until its webhook is registered again; joins still reach it as a service message.
+_ALLOWED_UPDATES = ["message", "edited_message", "callback_query", "message_reaction",
+                    "my_chat_member"]
+
+
+def reads_all_of(data: Any) -> "Optional[bool]":
+    """``result.can_read_all_group_messages`` of a ``getMe`` answer, only when it is a JSON
+    boolean of an ``ok`` answer; ``None`` for anything else (an error, the field absent, a
+    string). One reading for the registrar and the channel."""
+    if not isinstance(data, dict) or data.get("ok") is not True:
+        return None
+    value = (data.get("result") or {}).get("can_read_all_group_messages") \
+        if isinstance(data.get("result"), dict) else None
+    return value if isinstance(value, bool) else None
 
 
 class TelegramWebhookRegistrar:
@@ -166,6 +182,22 @@ class TelegramWebhookRegistrar:
             logger.warning("event=telegram_getme_failed error=%s", type(exc).__name__)
             return ""
 
+    async def reads_all_group_messages(self, *, token: str) -> "Optional[bool]":
+        """Does the bot read EVERY message of a group? ``getMe``'s ``can_read_all_group_messages``
+        (0.1.6): ``False`` is BotFather's privacy mode ON, ``True`` is it off, and ``None`` is
+        UNKNOWN — no token, a failed call, an answer without the field. Never a guess: with
+        privacy on, Telegram delivers to the bot only commands addressed to it, replies to it and
+        service messages, so a host that serves @mentions needs to SAY it cannot; and a host that
+        could not ask must not say either."""
+        if not token:
+            return None
+        try:
+            resp = await self._get(f"{self._api_base}/bot{token}/getMe")
+            return reads_all_of(resp.json() if resp.status_code < 500 else {})
+        except Exception as exc:  # noqa: BLE001 — unknown, never a failure of the caller
+            logger.warning("event=telegram_getme_failed error=%s", type(exc).__name__)
+            return None
+
     async def _get(self, url: str) -> "Any":
         if self._client is not None:
             return await self._client.get(url)
@@ -188,6 +220,9 @@ class NullTelegramRegistrar:
 
     async def bot_username(self, *, token: str) -> str:
         return ""
+
+    async def reads_all_group_messages(self, *, token: str) -> "Optional[bool]":
+        return None     # nothing was asked: unknown, never "privacy on"
 
     async def unregister(self, *, token: str, drop_pending: bool = True) -> "tuple[bool, str]":
         # Unlike register, this one needs no public URL — but an assembly with no registrar

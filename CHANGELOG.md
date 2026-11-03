@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.1.6 — 2026-11-03
+
+### Added
+- **THIS bot joined or left a Telegram group, as one event** (`MessageKind.MEMBERSHIP`, with the
+  same `ChannelConfig.accept_groups` switch on). A host that wants to register a room when the bot
+  is put in it had nothing to read: `my_chat_member` was not subscribed, and the service message
+  that announces the bot arrived as a group message of kind `UNKNOWN`. Measured on `df5b9a0`: a
+  `my_chat_member` naming the bot parsed to `None`, and a `new_chat_members` or a
+  `left_chat_member` naming it to kind `unknown`.
+  - `InboundMessage.membership` (keyword-only, default `None`, out of `repr` at its default like
+    the five group fields before it) holds a `Membership(status, title)`. `status` is
+    `MEMBERSHIP_JOINED` or `MEMBERSHIP_LEFT`, the provider's vocabulary folded at parse; `title`
+    is the room's name. `sender` and `conversation_id` are the room; `author` is empty, because
+    who added the bot is not the host's to keep.
+  - From `my_chat_member`: `member`, `administrator`, `restricted` with `is_member` → joined;
+    `left`, `kicked`, `restricted` without it → left. It is the only shape that reports a removal.
+  - From the service messages: `new_chat_members` naming the bot, `group_chat_created` and
+    `migrate_from_chat_id` (the new room of a group upgraded to a supergroup) → joined;
+    `left_chat_member` naming the bot and `migrate_to_chat_id` (the old room) → left.
+  - Dropped: the switch off, a private chat or a channel, a forum, a member that is not this bot
+    (by id, or by handle on a user marked `is_bot`). A service message about somebody else parses
+    as before.
+- **Does the bot read every group message? (BotFather's privacy mode.)**
+  `TelegramWebhookRegistrar.reads_all_group_messages(token=…)` and
+  `TelegramChannel.reads_all_group_messages()` read `getMe`'s `can_read_all_group_messages`:
+  `False` = privacy mode ON, `True` = off, `None` = UNKNOWN (no token, a failed call, the field
+  absent or not a JSON boolean) — never a guess. `NullTelegramRegistrar` answers `None`. With
+  privacy ON, Telegram delivers to a bot in a group only the commands addressed to it, the replies
+  to its messages and the service messages: an @mention alone never arrives, so a host serving
+  mentions needs to say so. One parser, `telegram_provisioning.reads_all_of`. The channel's read is
+  one `GET`, no retry, a 3 s timeout; a failure logs the class only.
+- **`_ALLOWED_UPDATES` gains `my_chat_member`.** A bot registered before 0.1.6 keeps its old
+  subscription until `TelegramWebhookRegistrar.register` runs again; until then it still sees a
+  join (the service message) and not a removal.
+
+### Unchanged
+- The 1:1 parse of every adapter: the corpus digests of `tests/unit/test_inbound_group_fields.py`
+  hold. Its `asdict` pin lists the new reserved key at its default, and the Cloud controls compare
+  every other key byte for byte.
+- No new log line.
+
+### Tests
+- `tests/unit/test_telegram_membership.py`: each shape both ways, the controls (another member, a
+  person named like the bot, a service message about somebody else), the drops, and the switch.
+  10 mutations, each killed. `tests/unit/test_telegram_provisioning.py`: the privacy read, both
+  answers, five kinds of unknown, no call without a token, the null. `tests/integration`: the
+  registrar subscribes and the update parses; the channel's privacy read over real httpx.
+
 ## 0.1.5 — 2026-11-02
 
 ### Added

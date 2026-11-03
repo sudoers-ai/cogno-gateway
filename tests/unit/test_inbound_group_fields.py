@@ -42,9 +42,12 @@ from cogno_gateway import (
     WhatsAppCloudChannel,
 )
 
-GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "reply_to_bot", "author_is_bot")
+# ``membership`` joined in 0.1.6 (THIS bot joined or left a room): a sixth reserved field, under
+# the same rule — hidden from ``repr`` at its default, so the corpus digests below still hold.
+GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "reply_to_bot", "author_is_bot",
+                "membership")
 DEFAULTS = {"conversation_id": "", "author": "", "mentions_bot": False, "reply_to_bot": False,
-            "author_is_bot": False}
+            "author_is_bot": False, "membership": None}
 
 # The fields as they were, in order — the positional shape a caller may rely on.
 OLD_FIELDS = ("channel", "sender", "sender_user_id", "kind", "message_id", "text", "media",
@@ -440,6 +443,9 @@ _CLOUD_CONTROL_BASE: "dict[str, tuple[str, str]]" = {
 def test_a_cloud_group_id_that_names_no_group_stays_a_1to1_message_byte_for_byte(label):
     msg = _CLOUD.parse_inbound(_cloud(_CLOUD_CONTROLS[label]))
     assert isinstance(msg, InboundMessage)
-    as_json = json.dumps(dataclasses.asdict(msg), sort_keys=True, ensure_ascii=False, default=str)
+    d = dataclasses.asdict(msg)
+    # The one key added after these digests were taken (0.1.6), at its default and nothing else.
+    assert d.pop("membership") is None
+    as_json = json.dumps(d, sort_keys=True, ensure_ascii=False, default=str)
     assert (_digest(repr(msg)), _digest(as_json)) == _CLOUD_CONTROL_BASE[label]
     assert (msg.sender, msg.text) == ("5511900000002", "oi")

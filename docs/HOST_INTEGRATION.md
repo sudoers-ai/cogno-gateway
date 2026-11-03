@@ -60,7 +60,7 @@ quick-reply / list option / inline button arrives as `kind=INTERACTIVE` with
 receive is a 1:1 message: the Telegram adapter drops `group`/`supergroup` chats (message, button
 tap and reaction), the Evolution adapter drops `@g.us` (message and presence), and the WhatsApp
 Cloud adapter drops a message whose object carries a `group_id` (every kind; since 0.1.2).
-`InboundMessage` carries five group fields, keyword-only and at the value that IS the 1:1 case:
+`InboundMessage` carries six group fields, keyword-only and at the value that IS the 1:1 case:
 
 | field | default | means |
 |---|---|---|
@@ -69,6 +69,7 @@ Cloud adapter drops a message whose object carries a `group_id` (every kind; sin
 | `mentions_bot` | `False` | the text @-mentions this bot (meaningful only in a group) |
 | `reply_to_bot` | `False` | it replies to one of this bot's messages (only in a group) |
 | `author_is_bot` | `False` | the author is a bot |
+| `membership` | `None` | set only on a `MessageKind.MEMBERSHIP` message: THIS bot joined or left the room (0.1.6) |
 
 They stay out of `repr` while at their default; `dataclasses.asdict` does carry them (a dataclass
 field cannot leave it). `dataclasses.replace` carries them through, so normalising `sender` never
@@ -94,6 +95,33 @@ person from `author`. Still dropped with the switch on: a group button tap or re
 posted on behalf of a chat (`sender_chat`: an anonymous admin, a linked channel's post), a message
 with no `from`, and a forum supergroup (`is_forum`). **What reaches a turn is yours to decide**:
 which rooms are registered, which trigger counts, who may speak. The adapter only parses.
+
+**The bot joined or left a room (Telegram, since 0.1.6, with the same switch on).** A message of
+kind `MessageKind.MEMBERSHIP` says it: `sender` and `conversation_id` are the room, `author` is
+empty (who added the bot is not carried), and `membership` is a `Membership(status, title)` whose
+`status` is `MEMBERSHIP_JOINED` or `MEMBERSHIP_LEFT` (the provider's `member`, `administrator`,
+`restricted`, `left` and `kicked` are folded at parse) and whose `title` is the room's name (`""`
+when absent; it is the room's text, never a log value). Two shapes produce it:
+
+| shape | joined | left |
+|---|---|---|
+| `my_chat_member` (the bot's own status changed) | `member`, `administrator`, `restricted` with `is_member` | `left`, `kicked`, `restricted` without it |
+| service message (every bot receives these, whatever its privacy mode) | `new_chat_members` naming the bot; `group_chat_created`; `migrate_from_chat_id` (a group upgraded to a supergroup gets a NEW id: this is the new room) | `left_chat_member` naming the bot; `migrate_to_chat_id` (the old room) |
+
+A REMOVAL arrives only as `my_chat_member`: a kicked bot receives nothing more from that room.
+`TelegramWebhookRegistrar` subscribes to it since 0.1.6, but a bot registered before keeps its old
+subscription until its webhook is registered again (`setWebhook` replaces the record); until then
+it still sees a join. Both shapes can arrive for the same join, so a host must handle a repeat.
+Dropped: the switch off, a private chat or a channel, a forum supergroup, a member that is not
+this bot, a service message about somebody else (that one parses as before, kind `UNKNOWN`).
+
+**Can the bot read the room? (BotFather's privacy mode, since 0.1.6.)** With privacy mode ON,
+Telegram delivers to a bot in a group ONLY the commands addressed to it (`/x@your_bot`), the
+replies to its own messages and the service messages: an @mention alone never arrives. Ask with
+`TelegramChannel.reads_all_group_messages()` or `TelegramWebhookRegistrar.reads_all_group_messages(
+token=…)` — `getMe`'s `can_read_all_group_messages`: `False` = privacy ON, `True` = off, `None` =
+unknown (a failed or partial answer), never a guess. The fix is the bot owner's: BotFather →
+`/mybots` → the bot → Bot Settings → Group Privacy → Turn off.
 **WhatsApp Cloud marks a group only inside the message.** Meta delivers a reply in a group the
 business created through its Groups API under the same `messages` webhook field as a 1:1 message,
 with a `group_id` in the message object and `from` set to the participant. Until 0.1.2 the adapter
