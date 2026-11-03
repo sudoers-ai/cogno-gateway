@@ -43,6 +43,9 @@ group (absent, `null`, empty, blank) stays 1:1.
 group message through with those fields filled — `sender` is the ROOM, `author` the member, and a
 mention is read from the message's entities in UTF-16 offsets. `OutboundMessage(reply_to_message_id=…)`
 threads the reply to the message that called the bot. Off (the default) is 0.1.3 byte for byte.
+Since 0.1.6 the same switch also reports THIS bot joining or leaving a room, as one
+`MessageKind.MEMBERSHIP` message (`my_chat_member`, which the registrar now subscribes to, and the
+service messages), so a host can register a room the moment the bot is put in it.
 See [`docs/HOST_INTEGRATION.md`](docs/HOST_INTEGRATION.md#2-receiving-inbound).
 
 ## Markup per channel, decided once

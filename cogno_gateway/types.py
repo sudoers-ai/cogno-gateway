@@ -25,6 +25,7 @@ class MessageKind(str, Enum):
     REACTION = "reaction"
     STICKER = "sticker"
     INTERACTIVE = "interactive"   # a quick-reply / list / inline-button selection
+    MEMBERSHIP = "membership"     # THIS bot joined or left a group (``InboundMessage.membership``)
     UNKNOWN = "unknown"
 
 
@@ -90,6 +91,26 @@ class Reaction:
 
     emoji: str
     target_message_id: str
+
+
+@dataclass(frozen=True)
+class Membership:
+    """THIS bot's own membership of a group changed (0.1.6, Telegram only, opt-in).
+
+    ``status`` is :data:`MEMBERSHIP_JOINED` or :data:`MEMBERSHIP_LEFT` — the two facts a host
+    acts on, never the provider's own vocabulary (``member``/``administrator``/``restricted``/
+    ``left``/``kicked``), which is folded at parse. ``title`` is the room's display name as the
+    provider sent it (``""`` when absent): a host may show it to an operator, and it is the
+    room's text, so it is never a log value. Nothing about WHO added or removed the bot is
+    carried: a host that registers a room has no use for that person's id."""
+
+    status: str
+    title: str = ""
+
+
+#: The two values of :attr:`Membership.status`.
+MEMBERSHIP_JOINED = "joined"
+MEMBERSHIP_LEFT = "left"
 
 
 @dataclass
@@ -192,12 +213,15 @@ class InboundMessage:
     #   the message replies to one of this bot's own messages. Meaningful only in a group.
     author_is_bot: bool = field(default=False, kw_only=True)
     #   the author is a bot (Telegram `from.is_bot`). A 1:1 chat with a bot never reaches us.
+    membership: Optional[Membership] = field(default=None, kw_only=True)
+    #   set on a ``MessageKind.MEMBERSHIP`` message only: THIS bot joined or left the room
+    #   (0.1.6). ``conversation_id`` and ``sender`` are the room; ``author`` is empty.
 
     def __repr__(self) -> str:
         """The generated dataclass ``repr``, minus the group fields while they hold their default.
 
         A 1:1 message therefore prints byte for byte as it did before the fields existed — the
-        string a log line or a failing assertion shows does not grow five constant entries on
+        string a log line or a failing assertion shows does not grow six constant entries on
         every message — and a group message, the day an adapter fills them, shows exactly the
         ones that say something."""
         shown = []
@@ -211,7 +235,8 @@ class InboundMessage:
 
 # The reserved group fields above, by name — the ones ``InboundMessage.__repr__`` leaves out at
 # their default. One definition, read by the repr and by the tests that pin the inertness.
-_GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "reply_to_bot", "author_is_bot")
+_GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "reply_to_bot", "author_is_bot",
+                 "membership")
 
 
 @dataclass

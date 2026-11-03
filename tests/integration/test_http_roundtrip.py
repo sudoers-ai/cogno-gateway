@@ -157,3 +157,61 @@ async def test_telegram_group_reply_is_threaded_to_the_room_over_real_httpx(mock
     assert json.loads(req.content) == {
         "chat_id": "-1001234567890", "text": "Abre às 8h.",
         "reply_parameters": {"message_id": 57, "allow_sending_without_reply": True}}
+
+
+async def test_the_registrar_subscribes_to_the_bots_membership_and_the_update_parses(mock_http):
+    """0.1.6: ``setWebhook`` over the real httpx layers asks for ``my_chat_member``, and the update
+    Telegram then posts (decoded from its JSON bytes, as a webhook receives it) parses to ONE
+    membership event for the room. Every id and handle is invented."""
+    from cogno_gateway import (MEMBERSHIP_LEFT, MessageKind, TelegramChannel,
+                               TelegramWebhookRegistrar)
+
+    rec = mock_http(lambda req: httpx.Response(200, json={"ok": True, "result": True}))
+    ok, desc = await TelegramWebhookRegistrar(webhook_base="https://host.invalid").register(
+        token="7000001:SEGREDO-INVENTADO", webhook_key="k1", secret="s")
+    assert (ok, desc) == (True, "")
+    sent = json.loads(rec.requests[0].content)
+    assert "my_chat_member" in sent["allowed_updates"]
+
+    body = json.dumps({"update_id": 3, "my_chat_member": {
+        "chat": {"id": -1001234567890, "type": "supergroup", "title": "Turma Inventada"},
+        "from": {"id": 5550001, "is_bot": False}, "date": 1,
+        "old_chat_member": {"user": {"id": 7000001, "is_bot": True}, "status": "member"},
+        "new_chat_member": {"user": {"id": 7000001, "is_bot": True}, "status": "kicked"}}}).encode()
+    ch = TelegramChannel(ChannelConfig(token="7000001:SEGREDO-INVENTADO", secret="s",
+                                       accept_groups=True, bot_username="@assistente_teste_bot"))
+    msg = ch.parse_inbound(json.loads(body))
+    assert msg.kind is MessageKind.MEMBERSHIP and msg.membership.status == MEMBERSHIP_LEFT
+    assert (msg.sender, msg.conversation_id, msg.author) == ("-1001234567890",
+                                                             "-1001234567890", "")
+
+
+@pytest.mark.parametrize("status,body,expected", [
+    (200, {"ok": True, "result": {"id": 7000001, "can_read_all_group_messages": False}}, False),
+    (200, {"ok": True, "result": {"id": 7000001, "can_read_all_group_messages": True}}, True),
+    (200, {"ok": True, "result": {"id": 7000001}}, None),
+    (401, {"ok": False, "description": "Unauthorized"}, None),
+    (500, {}, None),
+], ids=["privacy-on", "privacy-off", "field-absent", "refused", "server-error"])
+async def test_the_channel_reads_the_bots_privacy_over_real_httpx(mock_http, status, body,
+                                                                  expected):
+    """0.1.6: ONE ``getMe`` for the channel's own bot; privacy on is ``False``, and anything the
+    answer does not say is ``None`` (unknown), never ``False``. Every id is invented."""
+    from cogno_gateway import TelegramChannel
+
+    rec = mock_http(lambda req: httpx.Response(status, json=body))
+    ch = TelegramChannel(ChannelConfig(token="7000001:SEGREDO-INVENTADO", secret="s"))
+    assert await ch.reads_all_group_messages() is expected
+    assert [r.url.path for r in rec.requests] == ["/bot7000001:SEGREDO-INVENTADO/getMe"]
+
+
+async def test_the_channel_privacy_read_is_unknown_on_a_transport_error(mock_http, caplog):
+    from cogno_gateway import TelegramChannel
+
+    def _boom(req):
+        raise httpx.ConnectError("refused", request=req)
+
+    mock_http(_boom)
+    ch = TelegramChannel(ChannelConfig(token="7000001:SEGREDO-INVENTADO", secret="s"))
+    assert await ch.reads_all_group_messages() is None
+    assert "SEGREDO-INVENTADO" not in caplog.text

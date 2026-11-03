@@ -63,8 +63,9 @@ def test_register_sends_url_secret_and_allowed_updates():
     assert payload["secret_token"] == "s3cret"
     # the one definition every writer must share — ``setWebhook`` REPLACES the record, so
     # two lists that drift silently change which features work
+    # ``my_chat_member`` since 0.1.6: the one event that reports the bot REMOVED from a group.
     assert payload["allowed_updates"] == ["message", "edited_message", "callback_query",
-                                          "message_reaction"]
+                                          "message_reaction", "my_chat_member"]
 
 
 def test_register_omits_secret_token_when_secret_empty():
@@ -220,6 +221,52 @@ def test_a_provider_5xx_never_parses_a_body():
 def test_the_registrar_and_the_null_answer_the_same_three_calls():
     """The null is only useful if it is substitutable: a caller that branches on which one it
     got has learned exactly what the null exists to hide."""
-    for name in ("register", "unregister", "bot_username"):
+    for name in ("register", "unregister", "bot_username", "reads_all_group_messages"):
         assert callable(getattr(TelegramWebhookRegistrar(webhook_base="x"), name))
         assert callable(getattr(NullTelegramRegistrar(), name))
+
+
+# ── 0.1.6: does the bot read every group message? (BotFather's privacy mode) ─────────────
+import pytest  # noqa: E402
+
+from cogno_gateway.telegram_provisioning import reads_all_of  # noqa: E402
+
+
+@pytest.mark.parametrize("result,expected", [
+    ({"can_read_all_group_messages": False}, False),    # privacy mode ON
+    ({"can_read_all_group_messages": True}, True),      # privacy mode off
+], ids=["privacy-on", "privacy-off"])
+def test_reads_all_group_messages_reads_the_field(result, expected):
+    http = _FakeHttp(resp=_Resp(200, {"ok": True, "result": {"username": "b", **result}}))
+    assert asyncio.run(_reg(http).reads_all_group_messages(token="1:A")) is expected
+    assert http.calls[0][0] == "https://api.telegram.org/bot1:A/getMe"
+
+
+@pytest.mark.parametrize("http", [
+    _FakeHttp(resp=_Resp(401, {"ok": False, "description": "Unauthorized"})),
+    _FakeHttp(resp=_Resp(502, {"ok": True, "result": {"can_read_all_group_messages": False}})),
+    _FakeHttp(resp=_Resp(200, {"ok": True, "result": {"username": "b"}})),
+    _FakeHttp(resp=_Resp(200, {"ok": True, "result": {"can_read_all_group_messages": "false"}})),
+    _FakeHttp(exc=RuntimeError("conn refused")),
+], ids=["refused", "server-error", "field-absent", "field-a-string", "transport-error"])
+def test_unknown_is_none_and_never_privacy_on(http):
+    """A failed or partial answer is UNKNOWN: ``None``, never ``False`` — a host must not tell an
+    operator to change a setting it could not read."""
+    assert asyncio.run(_reg(http).reads_all_group_messages(token="1:A")) is None
+
+
+def test_reads_all_without_a_token_never_calls_telegram_and_the_null_does_not_know():
+    http = _FakeHttp()
+    assert asyncio.run(_reg(http).reads_all_group_messages(token="")) is None
+    assert http.calls == []
+    assert asyncio.run(NullTelegramRegistrar().reads_all_group_messages(token="1:A")) is None
+
+
+@pytest.mark.parametrize("data", [
+    None, [], {"ok": False}, {"ok": "true", "result": {}}, {"ok": True, "result": "x"},
+    {"ok": True, "result": {"can_read_all_group_messages": 0}},
+    # a refused answer that still carries the field is not an answer
+    {"ok": False, "result": {"can_read_all_group_messages": False}},
+], ids=["none", "list", "not-ok", "ok-string", "result-not-object", "zero", "refused-with-field"])
+def test_reads_all_of_answers_a_json_boolean_or_nothing(data):
+    assert reads_all_of(data) is None
