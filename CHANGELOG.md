@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.7 — 2026-11-04
+
+### Fixed
+- **A markdown table sent to WhatsApp, Telegram or the web widget showed as raw pipes.** None of
+  them renders a table (the web widget has no markdown renderer, the same reason its bold cell
+  strips), and an instruction to the model not to write one is not a guarantee, so the conversion
+  is here, beside the bold dialect, where the channel is known. On those three channels
+  `to_channel_markup` now turns every table into a list (`tables_to_lists`, exported): the
+  header's cells joined by « — » on the first line, then one `• a — b — c` line per row; the
+  `|---|` delimiter row and empty cells are dropped, and a `**bold**` cell is still converted.
+  - A table is GFM's: a header row with a pipe, the delimiter row right under it with as many
+    cells (`---`, `:--:`, `--:`), then the piped rows. NOT a table, and left byte for byte: a
+    line with a pipe in a sentence, piped lines with no delimiter row (dashes in a cell are not
+    one), a delimiter of another width, and anything inside a fenced code block.
+  - Text with no table is the same string; converting twice equals converting once.
+  - `markdown`, `plain` and an unknown channel keep the table. The day the web widget renders
+    markdown, `web` leaves the set together with its bold cell.
+  - `tests/unit/test_markup_tables.py`, through the three WhatsApp/Telegram adapters to the wire
+    and through web's `serialize`.
+
 ## 0.1.6 — 2026-11-03
 
 ### Added

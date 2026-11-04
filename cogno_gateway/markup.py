@@ -51,7 +51,7 @@ from __future__ import annotations
 import logging
 import re
 
-__all__ = ["log_outbound_markup", "to_channel_markup"]
+__all__ = ["log_outbound_markup", "tables_to_lists", "to_channel_markup"]
 
 
 #: The bold delimiter to WRITE, per channel — the one table this module exists to own.
@@ -103,8 +103,91 @@ _MD_BOLD = "**"
 _BOLD_RUN = re.compile(r"\*\*(?=\S)([^\n]+?)(?<=\S)\*\*")
 
 
+#: The channels that draw a markdown TABLE as what it is in the source — pipes and dashes. A table
+#: reaching them is rewritten as a list (:func:`tables_to_lists`). WhatsApp renders no table at
+#: all, Telegram renders the body literally (no ``parse_mode``, see the note at the end of this
+#: module), and the web widget draws the bubble as ``whitespace-pre-wrap`` with no markdown
+#: renderer (the reason its bold cell strips, above) — so on all three the contact read
+#: ``| Pedido | Estado |`` line after line. **If the widget gains a renderer, ``web`` leaves this
+#: set together with its bold cell.** ``markdown`` and ``plain`` are not here: the table reaches
+#: them as written.
+_TABLES_AS_LISTS = frozenset({"whatsapp", "telegram", "web"})
+
+#: A fenced code block opens and closes on a line that starts with three backticks or tildes.
+#: Nothing inside one is a table: a pipe there is the content's own.
+_FENCE = re.compile(r"^\s*(```|~~~)")
+#: GFM's delimiter row: cells made only of dashes, optionally colon-aligned (``---``, ``:--:``,
+#: ``--:``), separated by pipes. It is what makes a block of piped lines a TABLE — a line with a
+#: pipe in a sentence has none below it.
+_DELIMITER_CELL = re.compile(r"^\s*:?-+:?\s*$")
+#: The bullet and the joiner of the list a table becomes.
+_BULLET, _JOIN = "• ", " — "
+
+
+def _cells(line: str) -> "list[str]":
+    """The cells of a piped row: split on the unescaped pipes, the outer ones dropped, each cell
+    stripped and its escaped pipes unescaped."""
+    body = line.strip()
+    if body.startswith("|"):
+        body = body[1:]
+    if body.endswith("|") and not body.endswith("\\|"):
+        body = body[:-1]
+    return [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", body)]
+
+
+def _is_delimiter(line: str, width: int) -> bool:
+    """Is ``line`` the delimiter row of a table whose header has ``width`` cells?"""
+    if "|" not in line:
+        return False
+    cells = _cells(line)
+    return len(cells) == width and all(_DELIMITER_CELL.match(c) for c in cells)
+
+
+def tables_to_lists(text: str) -> str:
+    """Every markdown TABLE in ``text`` rewritten as a list; everything else byte for byte.
+
+    A table is GFM's: a header row with a pipe, the delimiter row right under it with as many
+    cells (``|---|:--:|``), then the piped rows that follow it. It becomes the header's cells
+    joined by «—» on the first line, then one «• a — b — c» line per row; the delimiter row is
+    dropped, and so are empty cells. The header stays as the FIRST line and not as a prefix on
+    every row: with three or four columns a prefix repeats the column names on every line and
+    triples its length, while one header line reads like the caption of the list under it.
+
+    NOT a table, and left exactly as written: a line with a pipe that has no delimiter row under
+    it («A | B» in a sentence), a header and delimiter whose cell counts differ, and anything
+    inside a fenced code block. Text with no table comes back as the same string. Idempotent: the
+    list has no delimiter row, so a second pass finds no table."""
+    body = text if isinstance(text, str) else str(text or "")
+    if "|" not in body or "-" not in body:
+        return body
+    lines = body.split("\n")
+    out: "list[str]" = []
+    i, fenced, changed = 0, False, False
+    while i < len(lines):
+        line = lines[i]
+        if _FENCE.match(line):
+            fenced = not fenced
+            out.append(line)
+            i += 1
+            continue
+        if (not fenced and "|" in line and i + 1 < len(lines)
+                and _is_delimiter(lines[i + 1], len(_cells(line)))):
+            out.append(_JOIN.join(c for c in _cells(line) if c))
+            i += 2
+            while i < len(lines) and "|" in lines[i] and lines[i].strip() \
+                    and not _FENCE.match(lines[i]):
+                out.append(_BULLET + _JOIN.join(c for c in _cells(lines[i]) if c))
+                i += 1
+            changed = True
+            continue
+        out.append(line)
+        i += 1
+    return "\n".join(out) if changed else body
+
+
 def to_channel_markup(text: str, channel: str = "") -> str:
-    """Rewrite markdown bold into ``channel``'s dialect. Everything else is left alone.
+    """Rewrite markdown bold into ``channel``'s dialect — and, on WhatsApp, Telegram and web, a
+    markdown table into a list (:func:`tables_to_lists`). Everything else is left alone.
 
     ``**Setembro**`` → ``*Setembro*`` on WhatsApp, and ``Setembro`` on Telegram and on web,
     neither of which renders markup today.
@@ -121,10 +204,14 @@ def to_channel_markup(text: str, channel: str = "") -> str:
     happens to the reply inside this library.
     """
     body = text if isinstance(text, str) else str(text or "")
+    cell = str(channel or "").strip().lower()
+    if cell in _TABLES_AS_LISTS:
+        # The table first, so a «**» inside a cell is still converted below.
+        body = tables_to_lists(body)
     if not body or _MD_BOLD not in body:
         return body
 
-    mark = _BOLD_MARK.get(str(channel or "").strip().lower(), _UNKNOWN_MARK)
+    mark = _BOLD_MARK.get(cell, _UNKNOWN_MARK)
     if mark == _MD_BOLD:
         # The identity cell (``markdown``, the only one left since web was measured and moved).
         # Returned unconverted rather than substituted with itself, so "the gateway does not
