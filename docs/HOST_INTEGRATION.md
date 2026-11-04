@@ -182,6 +182,16 @@ A transport failure is returned (`ok=False`), not raised, so the host decides.
 own channel's dialect on the way out — `*bold*` on WhatsApp, stripped on Telegram and on web —
 via `to_channel_markup`, which is exported if you ever need it directly.
 
+**Tables, on WhatsApp and Telegram (0.1.7).** Neither renders a markdown table, so a reply that
+carried one reached the contact as raw pipes and dashes. Those two adapters now send it as a list
+(`tables_to_lists`): the header's cells joined by « — » on the first line, then one
+`• a — b — c` line per row; the delimiter row and empty cells are dropped, a `**bold**` cell is
+still converted. The header is ONE first line rather than a prefix on every row: with three or
+four columns a prefix repeats the column names on each line. A table is GFM's — a piped header
+row with a delimiter row of as many cells right under it — so a line with a pipe in a sentence,
+a block of piped lines without that row, and anything inside a fenced code block are left as
+written, and text with no table is the same string. Web, `markdown` and `plain` keep the table.
+
 Telegram and web strip because neither renders markup **today**: this gateway sets no Telegram
 `parse_mode`, and the web widget draws the bubble as `whitespace-pre-wrap` with no markdown
 renderer behind it (measured, not assumed). Both cells carry that condition in the table, so

@@ -41,7 +41,7 @@ from cogno_gateway.types import (
 )
 from cogno_gateway.ports import Channel, GatewayError, PresenceAwareChannel
 from cogno_gateway.chunker import split_message
-from cogno_gateway.markup import to_channel_markup
+from cogno_gateway.markup import tables_to_lists, to_channel_markup
 from cogno_gateway.net import (
     FamilyFallbackBackend,
     FamilyFallbackTransport,
@@ -92,6 +92,7 @@ __all__ = [
     "PresenceAwareChannel",
     "GatewayError",
     "split_message",
+    "tables_to_lists",
     "to_channel_markup",
     "build_async_client",
     "FamilyFallbackBackend",
