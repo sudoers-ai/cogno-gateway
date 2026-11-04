@@ -105,10 +105,13 @@ _BOLD_RUN = re.compile(r"\*\*(?=\S)([^\n]+?)(?<=\S)\*\*")
 
 #: The channels that draw a markdown TABLE as what it is in the source — pipes and dashes. A table
 #: reaching them is rewritten as a list (:func:`tables_to_lists`). WhatsApp renders no table at
-#: all, and Telegram renders the body literally (no ``parse_mode``, see the note at the end of
-#: this module), so on both the contact read ``| Pedido | Estado |`` line after line. Web and the
-#: other cells are NOT here: the table reaches them as written.
-_TABLES_AS_LISTS = frozenset({"whatsapp", "telegram"})
+#: all, Telegram renders the body literally (no ``parse_mode``, see the note at the end of this
+#: module), and the web widget draws the bubble as ``whitespace-pre-wrap`` with no markdown
+#: renderer (the reason its bold cell strips, above) — so on all three the contact read
+#: ``| Pedido | Estado |`` line after line. **If the widget gains a renderer, ``web`` leaves this
+#: set together with its bold cell.** ``markdown`` and ``plain`` are not here: the table reaches
+#: them as written.
+_TABLES_AS_LISTS = frozenset({"whatsapp", "telegram", "web"})
 
 #: A fenced code block opens and closes on a line that starts with three backticks or tildes.
 #: Nothing inside one is a table: a pipe there is the content's own.
@@ -183,7 +186,7 @@ def tables_to_lists(text: str) -> str:
 
 
 def to_channel_markup(text: str, channel: str = "") -> str:
-    """Rewrite markdown bold into ``channel``'s dialect — and, on WhatsApp and Telegram, a
+    """Rewrite markdown bold into ``channel``'s dialect — and, on WhatsApp, Telegram and web, a
     markdown table into a list (:func:`tables_to_lists`). Everything else is left alone.
 
     ``**Setembro**`` → ``*Setembro*`` on WhatsApp, and ``Setembro`` on Telegram and on web,

@@ -57,10 +57,10 @@ channel the text is going to. It is a delimiter swap, never a markdown renderer:
 globs and unpaired markers reach the contact exactly as written. Each cell of the table carries
 the reason it holds the value it does, so it can be turned when the surface changes.
 
-Since 0.1.7 a markdown **table** gets the same treatment on WhatsApp and Telegram, which render
-none: a table (a header row, its `|---|` delimiter row, the rows) is sent as a list — the header's
+Since 0.1.7 a markdown **table** gets the same treatment on WhatsApp, Telegram and web, none of
+which renders one: a table (a header row, its `|---|` delimiter row, the rows) is sent as a list — the header's
 cells on the first line, then one `• a — b — c` line per row (`tables_to_lists`). Text with no
-table is the same string, a fenced code block is never touched, and web keeps the table.
+table is the same string, a fenced code block is never touched, and `markdown`/`plain` keep it.
 
 ## Reaching the provider: two budgets, and a family that answers
 
