@@ -31,6 +31,8 @@ def extract_choice_list(ego_result) -> list[dict]:
 
 
 def main() -> None:
+    # The web widget is open by design (the host's own auth/CORS-guarded route); unlike a
+    # provider webhook it does not fail closed on a missing secret. Local demo only.
     web = WebChannel()
 
     # ── Turn 1: the EGO called list_services(); the SUPEREGO voiced a prompt ──

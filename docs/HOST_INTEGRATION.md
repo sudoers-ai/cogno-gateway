@@ -38,6 +38,19 @@ channel = create_channel("telegram", ChannelConfig(token=bot_token, secret=hook_
 if not channel.verify(headers=request.headers, body=raw_body):
     return 401
 msg = channel.parse_inbound(await request.json())
+
+# ── Verification default (three states) ──
+# `ChannelConfig.require_secret` defaults to `None` (unset) = the kind's SECURE DEFAULT:
+#   * a PROVIDER webhook (Telegram / Evolution / WhatsApp Cloud) FAILS CLOSED — `verify()`
+#     rejects an inbound delivery when no secret is configured, since anyone who learns the URL
+#     could forge one;
+#   * the WEB widget stays OPEN — it is the host's OWN auth/CORS-guarded chat route, with no
+#     third party to share a secret with, so failing it closed would break the web chat for no
+#     gain.
+# An explicit `True`/`False` is HONOURED BY EVERY KIND: a deployment with no secret opts out with
+# `ChannelConfig(..., require_secret=False)`; a host that wants the web widget verified sets
+# `require_secret=True` on it. The verify() refusal line says how to opt out and never logs the
+# secret. (Internally the posture is read via `ChannelConfig.secret_required(default=...)`.)
 if msg is None:
     return 200                                  # echo / unsupported event — ignore
 

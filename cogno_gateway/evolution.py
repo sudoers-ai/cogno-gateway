@@ -61,7 +61,13 @@ class EvolutionChannel:
         self._base = config.base_url.rstrip("/")
         self._instance = config.instance
         if not config.secret:
-            logger.warning("channel=whatsapp event=verify_open reason=no_secret_configured")
+            if config.secret_required(default=True):
+                logger.warning(
+                    "channel=whatsapp event=verify_fail_closed reason=no_secret_configured — "
+                    "inbound is REJECTED by default without a webhook secret; configure one, "
+                    "or pass require_secret=False to accept unverified inbound (dev/demo only)")
+            else:
+                logger.warning("channel=whatsapp event=verify_open reason=no_secret_configured")
 
     def _headers(self) -> dict:
         return {"apikey": self._cfg.token, "Content-Type": "application/json"}
@@ -69,8 +75,10 @@ class EvolutionChannel:
     # ── verify ────────────────────────────────────────────────────────
     def verify(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         if not self._cfg.secret:
-            if self._cfg.require_secret:   # production: no secret → reject forged deliveries
-                logger.warning("channel=whatsapp event=verify_denied reason=secret_required")
+            if self._cfg.secret_required(default=True):   # production: no secret → reject forged deliveries
+                logger.warning("channel=whatsapp event=verify_denied reason=secret_required — "
+                               "configure a webhook secret, or pass require_secret=False to "
+                               "accept unverified inbound (dev/demo only)")
                 return False
             return True
         got = headers.get("apikey") or headers.get("authorization") or ""

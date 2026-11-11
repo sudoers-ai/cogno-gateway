@@ -80,7 +80,13 @@ class WhatsAppCloudChannel:
         self._base = (config.base_url or f"{_GRAPH_HOST}/{version}").rstrip("/")
         self._phone_id = config.instance
         if not config.secret:
-            logger.warning("channel=whatsapp_cloud event=verify_open reason=no_secret_configured")
+            if config.secret_required(default=True):
+                logger.warning(
+                    "channel=whatsapp_cloud event=verify_fail_closed reason=no_secret_configured — "
+                    "inbound is REJECTED by default without a webhook secret; configure one, "
+                    "or pass require_secret=False to accept unverified inbound (dev/demo only)")
+            else:
+                logger.warning("channel=whatsapp_cloud event=verify_open reason=no_secret_configured")
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self._cfg.token}", "Content-Type": "application/json"}
@@ -89,8 +95,10 @@ class WhatsAppCloudChannel:
     def verify(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         """HMAC-SHA256 check of the request body (``X-Hub-Signature-256``)."""
         if not self._cfg.secret:
-            if self._cfg.require_secret:   # production: no app secret → reject forged deliveries
-                logger.warning("channel=whatsapp_cloud event=verify_denied reason=secret_required")
+            if self._cfg.secret_required(default=True):   # production: no app secret → reject forged deliveries
+                logger.warning("channel=whatsapp_cloud event=verify_denied reason=secret_required — "
+                               "configure a webhook secret, or pass require_secret=False to "
+                               "accept unverified inbound (dev/demo only)")
                 return False
             return True
         sig = headers.get("x-hub-signature-256") or headers.get("X-Hub-Signature-256") or ""

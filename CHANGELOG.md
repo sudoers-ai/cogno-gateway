@@ -2,6 +2,21 @@
 
 ## 0.1.8 — 2026-11-11
 
+### Changed
+
+- **BREAKING (default): provider webhooks now require a secret by default.**
+  `ChannelConfig.require_secret` now defaults to **`None` (unset)**, which means *the kind's
+  secure default*: a Telegram / Evolution / WhatsApp Cloud webhook **fails closed** (rejects an
+  inbound delivery when no webhook secret is configured — anyone who learns the URL could
+  otherwise forge one), while the **web widget stays open** (it is the host's own
+  auth/CORS-guarded chat route, with no third party to share a secret with, so failing it closed
+  would break the web chat for no gain). An **explicit `True`/`False` is honoured by every kind**:
+  a deployment that genuinely has no secret opts out with `require_secret=False`, and a host that
+  wants the web widget verified sets `require_secret=True` on it. Read the posture through
+  `ChannelConfig.secret_required(default=...)`, never by truthiness. This first shipped
+  open-by-default in 0.x; provider webhooks are now secure by default. The refusal log line says
+  how to opt out and never logs the secret.
+
 ### Added
 - **Write-safe send retries for the Evolution and WhatsApp Cloud channels.** A send is now
   retried on a failure where nothing provably reached the provider — a connection failure, a

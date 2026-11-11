@@ -269,9 +269,30 @@ class ChannelConfig:
     instance: str = ""     # evolution instance name
     secret: str = ""       # webhook verification secret
     # When True, verify() FAILS CLOSED if no secret is configured (an inbound webhook is rejected
-    # rather than trusted). Default False keeps the dev/demo behaviour (open with a warning); the
-    # host sets it True in production so a signature-capable channel cannot run unverified.
-    require_secret: bool = False
+    # rather than trusted) — the SECURE DEFAULT for a provider webhook (Telegram / Evolution /
+    # WhatsApp Cloud): a signature-capable channel must not silently run unverified, since anyone
+    # who learns the URL could otherwise forge an inbound delivery.
+    #
+    # Two decisions, in order. It FIRST shipped False (2026-08): open-by-default with a warning,
+    # from when this library's only client was our own host, which always passed the flag
+    # explicitly. It is now True: a provider channel built without a secret rejects inbound by
+    # default, and a deployment that genuinely has none opts OUT explicitly (``require_secret=
+    # False``, dev/demo). The ``WebChannel`` is NOT a provider webhook — it is the host's own
+    # widget route, guarded by the host's auth/CORS, with no third party to share a secret with —
+    # so it stays OPEN by design and does not read this default (see the ``web`` branch of
+    # ``create_channel``); failing it closed would break the web chat for no gain.
+    # Three states (so the two kinds can have DIFFERENT secure defaults and an EXPLICIT choice is
+    # honoured by every kind): ``None`` = unset, the kind's secure default — CLOSED for a provider
+    # webhook, OPEN for the host's own web widget; ``True``/``False`` = the caller's explicit choice,
+    # read the same by every kind. Read it through :meth:`secret_required`, never by truthiness.
+    require_secret: Optional[bool] = None
+
+    def secret_required(self, *, default: bool) -> bool:
+        """The verification posture for ONE kind: an explicit ``require_secret`` wins for every
+        kind; unset (``None``) is that kind's secure ``default`` (True for a provider webhook,
+        False for the web widget)."""
+        return default if self.require_secret is None else bool(self.require_secret)
+
     max_chars: int = 0     # outbound chunk size (0 → adapter default)
     # The READ budget: how long a provider may take to ANSWER. The connect budget is
     # separate and much shorter (``cogno_gateway.net``) — an address that never answers

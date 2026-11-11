@@ -288,9 +288,15 @@ def test_verify_non_ascii_signature_returns_false_not_crash():
 
 
 # ── require_secret (security audit 2026-08-04) ───────────────────────────────
-def test_verify_open_without_secret_by_default():
+def test_verify_fails_closed_without_secret_by_default():
+    # 2026-11: a provider webhook rejects by default when no secret is configured.
     ch = WhatsAppCloudChannel(ChannelConfig(token="T", instance="123"))
-    assert ch.verify(headers={}, body=b"") is True          # dev/demo unchanged
+    assert ch.verify(headers={}, body=b"") is False
+
+
+def test_verify_open_when_require_secret_opted_out():
+    ch = WhatsAppCloudChannel(ChannelConfig(token="T", instance="123", require_secret=False))
+    assert ch.verify(headers={}, body=b"") is True          # explicit opt-out (dev/demo)
 
 
 def test_verify_fails_closed_when_secret_required():
