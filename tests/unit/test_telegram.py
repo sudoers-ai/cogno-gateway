@@ -116,9 +116,15 @@ def test_verify():
     assert ch.verify(headers={"x-telegram-bot-api-secret-token": "x"}, body=b"") is False
 
 
-def test_verify_open_without_secret_by_default():
-    # dev/demo default: no secret configured → open (host guards the route), a warning is logged.
+def test_verify_fails_closed_without_secret_by_default():
+    # 2026-11: a provider webhook rejects by default when no secret is configured.
     ch = TelegramChannel(ChannelConfig(token="BOT123"))
+    assert ch.verify(headers={}, body=b"") is False
+
+
+def test_verify_open_when_require_secret_opted_out():
+    # The explicit opt-out recovers the old open behaviour (dev/demo).
+    ch = TelegramChannel(ChannelConfig(token="BOT123", require_secret=False))
     assert ch.verify(headers={}, body=b"") is True
 
 

@@ -40,6 +40,7 @@ import httpx
 from cogno_gateway.chunker import split_message
 from cogno_gateway.markup import log_outbound_markup, to_channel_markup
 from cogno_gateway.net import build_async_client
+from cogno_gateway.retry import post_with_retry
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -79,7 +80,13 @@ class WhatsAppCloudChannel:
         self._base = (config.base_url or f"{_GRAPH_HOST}/{version}").rstrip("/")
         self._phone_id = config.instance
         if not config.secret:
-            logger.warning("channel=whatsapp_cloud event=verify_open reason=no_secret_configured")
+            if config.secret_required(default=True):
+                logger.warning(
+                    "channel=whatsapp_cloud event=verify_fail_closed reason=no_secret_configured — "
+                    "inbound is REJECTED by default without a webhook secret; configure one, "
+                    "or pass require_secret=False to accept unverified inbound (dev/demo only)")
+            else:
+                logger.warning("channel=whatsapp_cloud event=verify_open reason=no_secret_configured")
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self._cfg.token}", "Content-Type": "application/json"}
@@ -88,8 +95,10 @@ class WhatsAppCloudChannel:
     def verify(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         """HMAC-SHA256 check of the request body (``X-Hub-Signature-256``)."""
         if not self._cfg.secret:
-            if self._cfg.require_secret:   # production: no app secret → reject forged deliveries
-                logger.warning("channel=whatsapp_cloud event=verify_denied reason=secret_required")
+            if self._cfg.secret_required(default=True):   # production: no app secret → reject forged deliveries
+                logger.warning("channel=whatsapp_cloud event=verify_denied reason=secret_required — "
+                               "configure a webhook secret, or pass require_secret=False to "
+                               "accept unverified inbound (dev/demo only)")
                 return False
             return True
         sig = headers.get("x-hub-signature-256") or headers.get("X-Hub-Signature-256") or ""
@@ -284,17 +293,17 @@ class WhatsAppCloudChannel:
                              "components": components}}
 
     async def _post(self, client: httpx.AsyncClient, url: str, body: dict) -> str:
-        resp = await client.post(url, headers=self._headers(), json=body)
-        resp.raise_for_status()
+        resp = await post_with_retry("whatsapp_cloud", client, url,
+                                     headers=self._headers(), json=body)
         msgs = resp.json().get("messages", [])
         return str(msgs[0].get("id", "")) if msgs else ""
 
     async def _upload_media(self, client: httpx.AsyncClient, data: bytes, mime: str,
                             filename: str) -> str:
-        resp = await client.post(
+        resp = await post_with_retry(
+            "whatsapp_cloud", client,
             f"{self._base}/{self._phone_id}/media",
             headers={"Authorization": f"Bearer {self._cfg.token}"},
             data={"messaging_product": "whatsapp", "type": mime},
             files={"file": (filename, data, mime)})
-        resp.raise_for_status()
         return str(resp.json().get("id", ""))

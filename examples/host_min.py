@@ -38,9 +38,13 @@ async def main() -> None:
     print("outbound:", web.serialize(inbound.sender, reply))
 
     # ── Other channels: build via the factory with per-tenant config ──────
+    # Provider webhooks fail closed by default now (require_secret=True): verify() rejects an
+    # inbound delivery unless a webhook secret is configured. Telegram carries one here; the
+    # Evolution demo has none, so it opts OUT explicitly — "local demo only", never production.
     create_channel("telegram", ChannelConfig(token="<BOT_TOKEN>", secret="<WEBHOOK_SECRET>"))
     create_channel("whatsapp", ChannelConfig(
-        base_url="http://localhost:8080", token="<EVOLUTION_APIKEY>", instance="tenant1"))
+        base_url="http://localhost:8080", token="<EVOLUTION_APIKEY>", instance="tenant1",
+        require_secret=False))   # local demo only — a real deployment configures a secret
     print("\ntelegram/whatsapp channels built (would call the provider API on send).")
 
     # Rich content is first-class: a reaction inbound, an audio reply, etc.

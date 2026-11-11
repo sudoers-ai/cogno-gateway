@@ -38,6 +38,19 @@ channel = create_channel("telegram", ChannelConfig(token=bot_token, secret=hook_
 if not channel.verify(headers=request.headers, body=raw_body):
     return 401
 msg = channel.parse_inbound(await request.json())
+
+# ── Verification default (three states) ──
+# `ChannelConfig.require_secret` defaults to `None` (unset) = the kind's SECURE DEFAULT:
+#   * a PROVIDER webhook (Telegram / Evolution / WhatsApp Cloud) FAILS CLOSED — `verify()`
+#     rejects an inbound delivery when no secret is configured, since anyone who learns the URL
+#     could forge one;
+#   * the WEB widget stays OPEN — it is the host's OWN auth/CORS-guarded chat route, with no
+#     third party to share a secret with, so failing it closed would break the web chat for no
+#     gain.
+# An explicit `True`/`False` is HONOURED BY EVERY KIND: a deployment with no secret opts out with
+# `ChannelConfig(..., require_secret=False)`; a host that wants the web widget verified sets
+# `require_secret=True` on it. The verify() refusal line says how to opt out and never logs the
+# secret. (Internally the posture is read via `ChannelConfig.secret_required(default=...)`.)
 if msg is None:
     return 200                                  # echo / unsupported event — ignore
 
@@ -175,6 +188,14 @@ await channel.send(msg.sender, OutboundMessage(text="Escolha um serviço:",
 `send` chunks long text (`split_message`, default 600 chars / 6 chunks — override
 via `ChannelConfig.max_chars`) and returns a `SendResult(ok, message_ids, error)`.
 A transport failure is returned (`ok=False`), not raised, so the host decides.
+
+**Send retries (write-safe only).** The Evolution and WhatsApp Cloud adapters retry a send a few
+times (0.5 s → 1 s → 2 s backoff, 3 attempts total) but ONLY where the request provably never
+reached the provider — a connection failure, a 429 (a short `Retry-After` honoured; a long one is
+returned as a failure rather than hung on), or a 502/503/504. A **read timeout** is never retried:
+it could duplicate a message the provider already accepted, which on a billed/template channel is
+the costly harm. Telegram keeps its own, deliberate read-timeout retry — on a conversational
+channel a duplicate beats a silently lost reply.
 
 ### Markup: send markdown, get the channel's dialect
 

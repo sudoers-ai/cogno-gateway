@@ -24,14 +24,15 @@ def create_channel(kind: str, config: ChannelConfig | None = None) -> Channel:
     """
     k = kind.lower()
     if k == "web":
-        # WebChannel is the outlier: it takes loose keywords rather than the config object,
-        # so every field it honours must be forwarded EXPLICITLY. ``require_secret`` was not,
-        # and a caller asking for verification silently got an open door — while the other
-        # three kinds, which read the config directly, failed closed on the same input.
-        return WebChannel(
-            secret=(config.secret if config else ""),
-            require_secret=(config.require_secret if config else False),
-        )
+        # The web widget is a SPECIAL CASE and is OPEN by design: it is the host's own chat
+        # route, guarded by the host's auth/CORS, with no third party to share a secret with.
+        # So it does NOT inherit the provider ``require_secret`` default (now True) — failing it
+        # closed on a missing secret would break the web chat for no gain. It is secured, when a
+        # host wants it, by configuring a ``secret`` (checked when present); it never fails closed
+        # merely because none is set. The provider kinds below read the config directly and so do
+        # fail closed by default.
+        return WebChannel(secret=(config.secret if config else ""),
+                          require_secret=(config.secret_required(default=False) if config else False))
     if config is None:
         raise GatewayError(f"channel {kind!r} requires a ChannelConfig")
     if k == "telegram":

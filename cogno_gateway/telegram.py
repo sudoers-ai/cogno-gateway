@@ -171,7 +171,13 @@ class TelegramChannel:
         self._bot_id: Optional[int] = int(prefix) if prefix.isdigit() else None
         self._bot_handle = (config.bot_username or "").strip().lstrip("@").lower()
         if not config.secret:
-            logger.warning("channel=telegram event=verify_open reason=no_secret_configured")
+            if config.secret_required(default=True):
+                logger.warning(
+                    "channel=telegram event=verify_fail_closed reason=no_secret_configured — "
+                    "inbound is REJECTED by default without a webhook secret; configure one, "
+                    "or pass require_secret=False to accept unverified inbound (dev/demo only)")
+            else:
+                logger.warning("channel=telegram event=verify_open reason=no_secret_configured")
 
 
     # ── one HTTP call, with one retry on a transport failure ──────────
@@ -224,8 +230,10 @@ class TelegramChannel:
     # ── verify ────────────────────────────────────────────────────────
     def verify(self, *, headers: Mapping[str, str], body: bytes) -> bool:
         if not self._cfg.secret:
-            if self._cfg.require_secret:   # production: no secret → reject forged updates
-                logger.warning("channel=telegram event=verify_denied reason=secret_required")
+            if self._cfg.secret_required(default=True):   # production: no secret → reject forged updates
+                logger.warning("channel=telegram event=verify_denied reason=secret_required — "
+                               "configure a webhook secret, or pass require_secret=False to "
+                               "accept unverified inbound (dev/demo only)")
                 return False
             return True  # dev/demo: secret token not configured → host guards the route
         got = headers.get(_SECRET_HEADER) or headers.get("X-Telegram-Bot-Api-Secret-Token") or ""

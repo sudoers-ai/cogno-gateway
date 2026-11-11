@@ -35,8 +35,11 @@ def test_verify():
                                         instance="inst1", secret="sek"))
     assert ch.verify(headers={"apikey": "sek"}, body=b"") is True
     assert ch.verify(headers={"apikey": "wrong"}, body=b"") is False
-    # open when no secret configured (host guards the route)
-    assert _ch().verify(headers={}, body=b"") is True
+    # fail-closed by DEFAULT now: no secret → reject (opt out with require_secret=False)
+    assert _ch().verify(headers={}, body=b"") is False
+    assert EvolutionChannel(ChannelConfig(base_url="http://evo:8080/", token="APIKEY",
+                                          instance="inst1", require_secret=False)
+                            ).verify(headers={}, body=b"") is True
 
 
 def test_parse_conversation():
@@ -260,8 +263,15 @@ def _evo_cfg(**kw):
     return ChannelConfig(token="K", base_url="https://evo.local", instance="i1", **kw)
 
 
-def test_verify_open_without_secret_by_default():
-    assert EvolutionChannel(_evo_cfg()).verify(headers={}, body=b"") is True
+def test_verify_fails_closed_without_secret_by_default():
+    # 2026-11: a provider webhook rejects by default when no secret is configured — anyone who
+    # learns the URL could otherwise forge a delivery.
+    assert EvolutionChannel(_evo_cfg()).verify(headers={}, body=b"") is False
+
+
+def test_verify_open_when_require_secret_opted_out():
+    # The explicit opt-out recovers the old open behaviour (dev/demo).
+    assert EvolutionChannel(_evo_cfg(require_secret=False)).verify(headers={}, body=b"") is True
 
 
 def test_verify_fails_closed_when_secret_required():
