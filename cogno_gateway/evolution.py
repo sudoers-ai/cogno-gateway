@@ -25,6 +25,7 @@ import httpx
 from cogno_gateway.chunker import split_message
 from cogno_gateway.markup import log_outbound_markup, to_channel_markup
 from cogno_gateway.net import build_async_client
+from cogno_gateway.retry import post_with_retry
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -177,6 +178,12 @@ class EvolutionChannel:
                 raise GatewayError(f"Evolution returned no base64 for message {ref.ref!r}")
             return base64.b64decode(b64)
 
+    async def _post(self, client: "httpx.AsyncClient", url: str, **kwargs):
+        """One send POST, retried only on the write-safe failures (see cogno_gateway.retry):
+        a connection failure, a 429 or a 502/503/504 — never a read timeout, which could
+        duplicate a message Evolution already accepted."""
+        return await post_with_retry("whatsapp", client, url, **kwargs)
+
     # ── send ──────────────────────────────────────────────────────────
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
         ids: list[str] = []
@@ -193,15 +200,14 @@ class EvolutionChannel:
         async with build_async_client(self._cfg) as client:
             try:
                 if message.reaction:
-                    resp = await client.post(
+                    resp = await self._post(client,
                         f"{self._base}/message/sendReaction/{self._instance}",
                         headers=self._headers(),
                         json={"key": {"remoteJid": recipient, "fromMe": False,
                                       "id": message.reaction.target_message_id},
                               "reaction": message.reaction.emoji})
-                    resp.raise_for_status()
                 if message.list_menu is not None:
-                    resp = await client.post(
+                    resp = await self._post(client,
                         f"{self._base}/message/sendList/{self._instance}",
                         headers=self._headers(),
                         json={"number": number, "title": "", "description": text or " ",
@@ -211,38 +217,33 @@ class EvolutionChannel:
                                    "rows": [{"rowId": r.id, "title": r.title, "description": ""}
                                             for r in s.rows]}
                                   for s in message.list_menu.sections]})
-                    resp.raise_for_status()
                     ids.append(str(resp.json().get("key", {}).get("id", "")))
                 elif message.buttons:
-                    resp = await client.post(
+                    resp = await self._post(client,
                         f"{self._base}/message/sendButtons/{self._instance}",
                         headers=self._headers(),
                         json={"number": number, "title": "", "description": text or " ",
                               "buttons": [{"type": "reply", "displayText": b.title, "id": b.id}
                                           for b in message.buttons]})
-                    resp.raise_for_status()
                     ids.append(str(resp.json().get("key", {}).get("id", "")))
                 else:
                     for chunk in split_message(text, max_chars=max_chars):
-                        resp = await client.post(
+                        resp = await self._post(client,
                             f"{self._base}/message/sendText/{self._instance}",
                             headers=self._headers(), json={"number": number, "text": chunk})
-                        resp.raise_for_status()
                         ids.append(str(resp.json().get("key", {}).get("id", "")))
                 if message.audio is not None:
                     audio_b64 = base64.b64encode(message.audio).decode("ascii")
-                    resp = await client.post(
+                    resp = await self._post(client,
                         f"{self._base}/message/sendWhatsAppAudio/{self._instance}",
                         headers=self._headers(), json={"number": number, "audio": audio_b64})
-                    resp.raise_for_status()
                     ids.append(str(resp.json().get("key", {}).get("id", "")))
                 for m in message.media:
-                    resp = await client.post(
+                    resp = await self._post(client,
                         f"{self._base}/message/sendMedia/{self._instance}",
                         headers=self._headers(),
                         json={"number": number, "media": m.url or m.ref,
                               "mediatype": "document", "caption": m.caption})
-                    resp.raise_for_status()
                     ids.append(str(resp.json().get("key", {}).get("id", "")))
             except httpx.HTTPError as exc:
                 logger.warning("channel=whatsapp event=send_failed sent=%d error=%s", len(ids), exc)

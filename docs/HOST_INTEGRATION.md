@@ -176,6 +176,14 @@ await channel.send(msg.sender, OutboundMessage(text="Escolha um serviço:",
 via `ChannelConfig.max_chars`) and returns a `SendResult(ok, message_ids, error)`.
 A transport failure is returned (`ok=False`), not raised, so the host decides.
 
+**Send retries (write-safe only).** The Evolution and WhatsApp Cloud adapters retry a send a few
+times (0.5 s → 1 s → 2 s backoff, 3 attempts total) but ONLY where the request provably never
+reached the provider — a connection failure, a 429 (a short `Retry-After` honoured; a long one is
+returned as a failure rather than hung on), or a 502/503/504. A **read timeout** is never retried:
+it could duplicate a message the provider already accepted, which on a billed/template channel is
+the costly harm. Telegram keeps its own, deliberate read-timeout retry — on a conversational
+channel a duplicate beats a silently lost reply.
+
 ### Markup: send markdown, get the channel's dialect
 
 **Write `**bold**` and stop thinking about it.** Every adapter converts markdown bold into its

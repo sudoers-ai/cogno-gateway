@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.8 — 2026-11-11
+
+### Added
+- **Write-safe send retries for the Evolution and WhatsApp Cloud channels.** A send is now
+  retried on a failure where nothing provably reached the provider — a connection failure, a
+  `429` (honouring a short `Retry-After`; a value over 5 s is returned as a failure rather than
+  waited out, since the send runs inside a turn), or a `502`/`503`/`504` — with a growing
+  backoff (0.5 s → 1 s → 2 s, 3 attempts total). A **read timeout is never retried**: it could
+  duplicate a message the provider already accepted, which on a per-message/template channel is
+  the costly harm. Telegram's existing, deliberate read-timeout retry is unchanged (on a chat
+  channel a duplicate beats a silently lost reply). Each retry logs the channel, the error class
+  and the attempt number — never the message text or the recipient.
+
 ## 0.1.7 — 2026-11-04
 
 ### Fixed

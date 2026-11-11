@@ -40,6 +40,7 @@ import httpx
 from cogno_gateway.chunker import split_message
 from cogno_gateway.markup import log_outbound_markup, to_channel_markup
 from cogno_gateway.net import build_async_client
+from cogno_gateway.retry import post_with_retry
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
     ButtonReply,
@@ -284,17 +285,17 @@ class WhatsAppCloudChannel:
                              "components": components}}
 
     async def _post(self, client: httpx.AsyncClient, url: str, body: dict) -> str:
-        resp = await client.post(url, headers=self._headers(), json=body)
-        resp.raise_for_status()
+        resp = await post_with_retry("whatsapp_cloud", client, url,
+                                     headers=self._headers(), json=body)
         msgs = resp.json().get("messages", [])
         return str(msgs[0].get("id", "")) if msgs else ""
 
     async def _upload_media(self, client: httpx.AsyncClient, data: bytes, mime: str,
                             filename: str) -> str:
-        resp = await client.post(
+        resp = await post_with_retry(
+            "whatsapp_cloud", client,
             f"{self._base}/{self._phone_id}/media",
             headers={"Authorization": f"Bearer {self._cfg.token}"},
             data={"messaging_product": "whatsapp", "type": mime},
             files={"file": (filename, data, mime)})
-        resp.raise_for_status()
         return str(resp.json().get("id", ""))
