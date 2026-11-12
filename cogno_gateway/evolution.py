@@ -141,7 +141,7 @@ class EvolutionChannel:
         group_author = ""
         reply_to_message_id = ""
         if is_group:
-            # W3 — the AUTHOR. `key.participant` is ALWAYS `<lid>@lid` (addressingMode="lid"); the
+            # The AUTHOR. `key.participant` is ALWAYS `<lid>@lid` (addressingMode="lid"); the
             # routable phone is the bridge `key.participantAlt = <phone>@s.whatsapp.net`. Invariant
             # (a): the author comes ONLY from a phone JID — no `participantAlt`, an `@lid`, or any
             # other host → SILENCE. The `@lid` is never promoted (there is no `@lid`→phone bridge to
@@ -154,12 +154,12 @@ class EvolutionChannel:
             # Invariant (b): a group message ALWAYS leaves with `conversation_id` set (== sender ==
             # the room), so a host can never read it as a 1:1 and answer the room as a person.
             group_conversation_id = sender
-            # W4-RESPOSTA (additive, PURE): expose the QUOTED id. `contextInfo` is a TOP-LEVEL
+            # The reply (additive, PURE): expose the QUOTED id. `contextInfo` is a TOP-LEVEL
             # sibling of `message` (`data.contextInfo`) — null on a plain message, carrying
             # `stanzaId` on a reply — read independently of `messageType`. The parser only exposes
             # the id; the HOST decides `reply_to_bot` against the room's buffer (`bot:<id>` lines).
             # `mentions_bot` is deliberately NOT set: the mention is by the bot's own LID, which
-            # this library does not yet know (W4-MENÇÃO waits for that).
+            # this library does not yet know (mention detection waits for that).
             ctx = data.get("contextInfo")
             if isinstance(ctx, dict):
                 reply_to_message_id = str(ctx.get("stanzaId", "") or "")

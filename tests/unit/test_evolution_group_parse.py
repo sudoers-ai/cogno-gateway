@@ -1,4 +1,4 @@
-"""Evolution group parse (W3 author + W4-RESPOSTA quoted id), behind ``accept_groups``.
+"""Evolution group parse (the author and the quoted id), behind ``accept_groups``.
 
 The shapes here are COPIED from a real capture of four WhatsApp group messages (plain, mention,
 reply, reply+mention): the keys, the nesting, the types and the relations between ids are the real
@@ -137,7 +137,7 @@ def test_on_invariant_b_conversation_id_is_always_the_room(label):
     assert msg.conversation_id == msg.sender == ROOM != ""   # never "" → never read as a 1:1
 
 
-# ── ON: W4-RESPOSTA — the quoted id is exposed; mentions_bot is NOT set (W4-MENÇÃO waits) ───────
+# ── ON: the quoted id is exposed; mentions_bot is NOT set (it needs the bot's own LID) ──────────
 def test_on_a_reply_exposes_the_quoted_stanza_id():
     msg = EvolutionChannel(_cfg(True)).parse_inbound(MSG_REPLY)
     assert isinstance(msg, InboundMessage)
@@ -154,7 +154,7 @@ def test_on_a_mention_only_message_has_no_quoted_id_and_no_mentions_bot():
     msg = EvolutionChannel(_cfg(True)).parse_inbound(MSG_MENTION)
     assert isinstance(msg, InboundMessage)
     assert msg.reply_to_message_id == ""         # a mention carries no stanzaId
-    assert msg.mentions_bot is False             # W4-MENÇÃO is not implemented (needs the own LID)
+    assert msg.mentions_bot is False             # mention detection needs the bot's own LID
 
 
 def test_on_reply_plus_mention_exposes_the_quoted_id_and_still_no_mentions_bot():
@@ -173,7 +173,7 @@ def test_on_the_bots_own_echo_in_a_group_still_drops():
 def test_the_reserved_fields_a_group_message_sets_are_the_designed_ones():
     """A parsed group message fills exactly ``conversation_id``, ``author`` and (on a reply)
     ``reply_to_message_id``; it never fills ``mentions_bot``, ``reply_to_bot`` or ``author_is_bot``
-    (those are the host's / W4-MENÇÃO's, not the pure parser's)."""
+    (those are the host's, not the pure parser's)."""
     msg = EvolutionChannel(_cfg(True)).parse_inbound(MSG_REPLY)
     filled = {f.name for f in dataclasses.fields(InboundMessage)
               if f.name in ("conversation_id", "author", "mentions_bot", "reply_to_bot",
