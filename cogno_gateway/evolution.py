@@ -134,8 +134,35 @@ class EvolutionChannel:
         if key.get("fromMe", False):
             return None  # our own echo
         sender = str(key.get("remoteJid", ""))
-        if sender.endswith("@g.us"):
-            return None  # ignore groups (1:1 only, mirrors the parent)
+        is_group = sender.endswith("@g.us")
+        if is_group and not self._cfg.accept_groups:
+            return None  # groups OFF (the default): drop at parse, exactly as before 0.1.x
+        group_conversation_id = ""
+        group_author = ""
+        reply_to_message_id = ""
+        if is_group:
+            # W3 — the AUTHOR. `key.participant` is ALWAYS `<lid>@lid` (addressingMode="lid"); the
+            # routable phone is the bridge `key.participantAlt = <phone>@s.whatsapp.net`. Invariant
+            # (a): the author comes ONLY from a phone JID — no `participantAlt`, an `@lid`, or any
+            # other host → SILENCE. The `@lid` is never promoted (there is no `@lid`→phone bridge to
+            # resolve it with); a registered member's phone JID resolves on the host with no change
+            # there (`channels._wa_same` already collapses it to the stored contact).
+            participant_alt = str(key.get("participantAlt", "") or "")
+            if not participant_alt.endswith("@s.whatsapp.net"):
+                return None
+            group_author = participant_alt
+            # Invariant (b): a group message ALWAYS leaves with `conversation_id` set (== sender ==
+            # the room), so a host can never read it as a 1:1 and answer the room as a person.
+            group_conversation_id = sender
+            # W4-RESPOSTA (additive, PURE): expose the QUOTED id. `contextInfo` is a TOP-LEVEL
+            # sibling of `message` (`data.contextInfo`) — null on a plain message, carrying
+            # `stanzaId` on a reply — read independently of `messageType`. The parser only exposes
+            # the id; the HOST decides `reply_to_bot` against the room's buffer (`bot:<id>` lines).
+            # `mentions_bot` is deliberately NOT set: the mention is by the bot's own LID, which
+            # this library does not yet know (W4-MENÇÃO waits for that).
+            ctx = data.get("contextInfo")
+            if isinstance(ctx, dict):
+                reply_to_message_id = str(ctx.get("stanzaId", "") or "")
         message_id = str(key.get("id", ""))
         msg = data.get("message", {}) or {}
         msg_type = data.get("messageType", "")
@@ -145,7 +172,9 @@ class EvolutionChannel:
                selection: Optional[ButtonReply] = None) -> InboundMessage:
             return InboundMessage(channel=self.name, sender=sender, kind=kind,
                                   message_id=message_id, text=text, media=media,
-                                  reaction=reaction, selection=selection, raw=data)
+                                  reaction=reaction, selection=selection, raw=data,
+                                  conversation_id=group_conversation_id, author=group_author,
+                                  reply_to_message_id=reply_to_message_id)
 
         if "reactionMessage" in msg:
             rm = msg["reactionMessage"]

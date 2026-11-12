@@ -73,7 +73,7 @@ quick-reply / list option / inline button arrives as `kind=INTERACTIVE` with
 receive is a 1:1 message: the Telegram adapter drops `group`/`supergroup` chats (message, button
 tap and reaction), the Evolution adapter drops `@g.us` (message and presence), and the WhatsApp
 Cloud adapter drops a message whose object carries a `group_id` (every kind; since 0.1.2).
-`InboundMessage` carries six group fields, keyword-only and at the value that IS the 1:1 case:
+`InboundMessage` carries seven group fields, keyword-only and at the value that IS the 1:1 case:
 
 | field | default | means |
 |---|---|---|
@@ -81,6 +81,7 @@ Cloud adapter drops a message whose object carries a `group_id` (every kind; sin
 | `author` | `""` | the member who wrote it; `""` = the sender wrote it |
 | `mentions_bot` | `False` | the text @-mentions this bot (meaningful only in a group) |
 | `reply_to_bot` | `False` | it replies to one of this bot's messages (only in a group) |
+| `reply_to_message_id` | `""` | the provider id this message QUOTES (Evolution `data.contextInfo.stanzaId`), exposed so a host can decide `reply_to_bot` itself (since 0.1.9) |
 | `author_is_bot` | `False` | the author is a bot |
 | `membership` | `None` | set only on a `MessageKind.MEMBERSHIP` message: THIS bot joined or left the room (0.1.6) |
 
@@ -142,6 +143,26 @@ did not read it, so such a reply arrived as a 1:1 message of the participant and
 to them in private; it is now dropped in `parse_batch`, and the 1:1 messages of the same delivery
 still arrive. A `group_id` that names no group — absent, `null`, empty or blank — is read as a
 1:1 message, exactly as before. **Inert for a host until it moves its pin of this library.**
+
+**Evolution fills the group fields when you opt in (since 0.1.9), with `accept_groups=True`.** The
+default, `False`, is byte for byte the old drop of every `@g.us`. With it on, a group `message`
+arrives with:
+
+| field | value in a group |
+|---|---|
+| `sender` / `conversation_id` | the ROOM's `key.remoteJid` (`…@g.us`) — the two are equal, so a host can never read a group as a 1:1 |
+| `author` | `key.participantAlt` — the member's PHONE JID (`<phone>@s.whatsapp.net`). `key.participant` is always the member's `<lid>@lid`, which does NOT route, so it is never the author |
+| `author_is_bot` | `False` (WhatsApp has no `is_bot`) |
+| `reply_to_message_id` | `data.contextInfo.stanzaId` — the id of the message this one quotes (a top-level sibling of `message`, null on a plain message), exposed so a host can decide `reply_to_bot` against its own record of what it sent |
+
+The author comes ONLY from a phone JID: **a group message with no `key.participantAlt`, or one that
+is not a `@s.whatsapp.net` JID, is dropped** (there is no `@lid`→phone bridge to route it). `key.
+fromMe` still drops (the bot's own echo). `mentions_bot` is NOT set yet: a WhatsApp @mention names
+the bot by its own `@lid`, which this library does not yet carry, so a mention-triggered turn is a
+host decision made elsewhere until then. **`reply_to_bot` is yours to decide from
+`reply_to_message_id`**: the parser is pure and does not know which ids are the bot's own — a host
+that keeps a short record of the ids it sent to a room (as the Cogno host does, in its room buffer)
+reads a reply to one of them as a call to the bot.
 
 ---
 
