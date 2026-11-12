@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.9 — 2026-11-12
+
+### Added
+- **The Evolution adapter parses a WhatsApp GROUP message when you opt in (`accept_groups=True`),
+  off by default (byte for byte the old drop of every `@g.us`).** With it on, a group `message`
+  fills the group fields of `InboundMessage`: `conversation_id` and `sender` are the room
+  (`key.remoteJid`, always equal, so a host can never read a group as a 1:1), and `author` is the
+  member's PHONE JID taken from `key.participantAlt` (`<phone>@s.whatsapp.net`). The author comes
+  ONLY from a phone JID — `key.participant` is always the member's `<lid>@lid`, which does not
+  route and is never promoted, so a group message with **no `participantAlt`, an `@lid`, or any
+  other host is dropped** (there is no `@lid`→phone bridge to route it). `key.fromMe` still drops
+  the bot's own echo. `author_is_bot` is always `False` (WhatsApp has no `is_bot`).
+- **A new reserved, keyword-only `InboundMessage.reply_to_message_id`** (default `""`, additive and
+  hidden from `repr` at its default, so a 1:1 message is byte for byte as before). The Evolution
+  adapter fills it in a group with `data.contextInfo.stanzaId` — the id of the message this one
+  QUOTES (a top-level sibling of `message`, null on a plain message, read independently of
+  `messageType`). It is exposed so a host can decide `reply_to_bot` itself, against its own record
+  of the ids it sent to the room; the parser stays pure and never decides it. `mentions_bot` is
+  deliberately NOT set by the Evolution group parser: a WhatsApp @mention names the bot by its own
+  `@lid`, which this library does not yet carry.
+
 ## 0.1.8 — 2026-11-11
 
 ### Changed

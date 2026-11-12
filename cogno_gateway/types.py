@@ -211,6 +211,15 @@ class InboundMessage:
     #   the text @-mentions this bot. Meaningful only with ``conversation_id`` set.
     reply_to_bot: bool = field(default=False, kw_only=True)
     #   the message replies to one of this bot's own messages. Meaningful only in a group.
+    #   Telegram fills it at parse (it carries the quoted message's author); Evolution cannot —
+    #   its parser is pure and the quote carries only an id — so there it stays False and the HOST
+    #   decides it from ``reply_to_message_id`` against the room's buffer.
+    reply_to_message_id: str = field(default="", kw_only=True)
+    #   the provider id of the message this one QUOTES (Evolution `data.contextInfo.stanzaId`),
+    #   exposed so a host can decide ``reply_to_bot`` itself: the room's buffer already holds the
+    #   bot's own sends under `bot:<id>`, so a reply whose quoted id is one of them called the bot.
+    #   "" = this message quotes nothing. Meaningful only in a group; the pure parser never acts on
+    #   it. Reserved like the fields above: hidden from ``repr`` at its default (see ``_GROUP_FIELDS``).
     author_is_bot: bool = field(default=False, kw_only=True)
     #   the author is a bot (Telegram `from.is_bot`). A 1:1 chat with a bot never reaches us.
     membership: Optional[Membership] = field(default=None, kw_only=True)
@@ -235,8 +244,11 @@ class InboundMessage:
 
 # The reserved group fields above, by name — the ones ``InboundMessage.__repr__`` leaves out at
 # their default. One definition, read by the repr and by the tests that pin the inertness.
-_GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "reply_to_bot", "author_is_bot",
-                 "membership")
+# ``reply_to_message_id`` joined in 0.1.9 (the quoted id a host reads to decide
+# ``reply_to_bot``): it is additive and default on every 1:1 message, so hiding it at its default
+# keeps a 1:1 message's repr byte for byte as before the field existed.
+_GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "reply_to_bot", "reply_to_message_id",
+                 "author_is_bot", "membership")
 
 
 @dataclass
