@@ -1,11 +1,12 @@
 """``EvolutionChannel.group_participants`` — the two reads a host asks beside a room's registration
 to learn the bot's own LID for a WhatsApp @mention (W4).
 
-The shapes here are COPIED from a real capture on 2026-11-12 (``fetch_instances_forma_real.json`` /
-``participantes_forma_real.json``): the ``fetchInstances`` body is a LIST of FLAT items, each with a
+The shapes here are COPIED from a real capture (``fetch_instances_forma_real.json`` /
+``group_info_forma_real.json``): the ``fetchInstances`` body is a LIST of FLAT items, each with a
 ``name`` and an ``ownerJid`` (``<digits>@s.whatsapp.net``, no ``:<n>``) beside a ``token`` (a secret)
-and a ``number``; the participants body is ``{"participants": [{"id": "<lid>@lid", "phoneNumber":
-"<phone>@s.whatsapp.net", …}]}``. Every id, number and token is synthetic.
+and a ``number``; the ``findGroupInfos`` body is ONE flat object carrying ``subject`` (the room's
+name, third-party text — never read or logged) and ``participants: [{"id": "<lid>@lid",
+"phoneNumber": "<phone>@s.whatsapp.net", …}]``. Every id, number, token and name is synthetic.
 
 What these twins pin:
 
@@ -33,6 +34,7 @@ AUTHOR_LID = "100000000000001@lid"
 AUTHOR_PHONE = "5511900000001@s.whatsapp.net"
 GROUP = "120363000000000001@g.us"
 SECRET_TOKEN = "SECRET-TOKEN-NEVER-LOG"
+SUBJECT = "Grupo Demo Inventado"            # the room's name — third-party text, never read/logged
 
 # fetchInstances → a LIST of FLAT items (real shape); the item carries token (secret) + number.
 FI_ONE = [{"id": "uuid-1", "name": INSTANCE, "connectionStatus": "open", "ownerJid": OWNER,
@@ -44,9 +46,11 @@ FI_OTHER = [dict(FI_ONE[0], name="cogno_other")]
 # the nested {instance:{instanceName,…}} shape, tolerated beside the flat one.
 FI_NESTED = [{"instance": {"instanceName": INSTANCE, "ownerJid": OWNER, "token": SECRET_TOKEN}}]
 
-PARTICIPANTS = {"participants": [
-    {"id": AUTHOR_LID, "phoneNumber": AUTHOR_PHONE, "admin": "superadmin"},
-    {"id": BOT_LID, "phoneNumber": OWNER, "admin": None}]}
+# findGroupInfos → ONE flat object: subject (the room name) + participants (real shape).
+GROUP_INFO = {"id": GROUP, "subject": SUBJECT, "size": 2, "owner": AUTHOR_LID,
+              "participants": [
+                  {"id": AUTHOR_LID, "phoneNumber": AUTHOR_PHONE, "admin": "superadmin"},
+                  {"id": BOT_LID, "phoneNumber": OWNER, "admin": None}]}
 
 
 def _chan() -> EvolutionChannel:
@@ -59,11 +63,11 @@ def _routes(fake, *, fetch=None, participants=None):
     if fetch is not None:
         fake.routes["fetchInstances"] = fetch
     if participants is not None:
-        fake.routes["group/participants"] = participants
+        fake.routes["group/findGroupInfos"] = participants
 
 
 async def test_the_happy_chain_owner_candidate_and_members(fake_httpx):
-    _routes(fake_httpx, fetch=FakeResponse(FI_ONE), participants=FakeResponse(PARTICIPANTS))
+    _routes(fake_httpx, fetch=FakeResponse(FI_ONE), participants=FakeResponse(GROUP_INFO))
     owners, members = await _chan().group_participants(GROUP)
     assert owners == (OWNER,)                         # exactly one candidate named this instance
     assert members == ((AUTHOR_LID, AUTHOR_PHONE), (BOT_LID, OWNER))
@@ -76,26 +80,26 @@ async def test_the_happy_chain_owner_candidate_and_members(fake_httpx):
 
 
 async def test_two_items_with_the_instance_name_surface_two_candidates(fake_httpx):
-    _routes(fake_httpx, fetch=FakeResponse(FI_TWO), participants=FakeResponse(PARTICIPANTS))
+    _routes(fake_httpx, fetch=FakeResponse(FI_TWO), participants=FakeResponse(GROUP_INFO))
     owners, members = await _chan().group_participants(GROUP)
     assert len(owners) == 2                           # the host reads this as ambiguous — never guesses
     assert members == ((AUTHOR_LID, AUTHOR_PHONE), (BOT_LID, OWNER))
 
 
 async def test_a_different_instance_name_yields_no_candidate(fake_httpx):
-    _routes(fake_httpx, fetch=FakeResponse(FI_OTHER), participants=FakeResponse(PARTICIPANTS))
+    _routes(fake_httpx, fetch=FakeResponse(FI_OTHER), participants=FakeResponse(GROUP_INFO))
     owners, _members = await _chan().group_participants(GROUP)
     assert owners == ()
 
 
 async def test_the_nested_instance_shape_is_tolerated(fake_httpx):
-    _routes(fake_httpx, fetch=FakeResponse(FI_NESTED), participants=FakeResponse(PARTICIPANTS))
+    _routes(fake_httpx, fetch=FakeResponse(FI_NESTED), participants=FakeResponse(GROUP_INFO))
     owners, _members = await _chan().group_participants(GROUP)
     assert owners == (OWNER,)
 
 
 async def test_fetch_instances_non_2xx_yields_no_candidate(fake_httpx):
-    _routes(fake_httpx, fetch=FakeResponse(status=500), participants=FakeResponse(PARTICIPANTS))
+    _routes(fake_httpx, fetch=FakeResponse(status=500), participants=FakeResponse(GROUP_INFO))
     owners, members = await _chan().group_participants(GROUP)
     assert owners == () and members == ((AUTHOR_LID, AUTHOR_PHONE), (BOT_LID, OWNER))
 
@@ -107,7 +111,7 @@ async def test_participants_non_2xx_yields_empty_members(fake_httpx):
 
 
 async def test_a_transport_failure_yields_empty_everything_and_logs_no_secret(fake_httpx, caplog):
-    _routes(fake_httpx, fetch=httpx.ConnectError("down"), participants=FakeResponse(PARTICIPANTS))
+    _routes(fake_httpx, fetch=httpx.ConnectError("down"), participants=FakeResponse(GROUP_INFO))
     with caplog.at_level("WARNING", logger="cogno_gateway.evolution"):
         owners, members = await _chan().group_participants(GROUP)
     assert (owners, members) == ((), ())
@@ -115,9 +119,11 @@ async def test_a_transport_failure_yields_empty_everything_and_logs_no_secret(fa
     assert "ConnectError" in caplog.text            # the class, never the message or any secret
 
 
-async def test_the_token_and_number_are_never_in_the_return(fake_httpx):
-    _routes(fake_httpx, fetch=FakeResponse(FI_ONE), participants=FakeResponse(PARTICIPANTS))
+async def test_the_token_number_and_subject_are_never_in_the_return(fake_httpx):
+    _routes(fake_httpx, fetch=FakeResponse(FI_ONE), participants=FakeResponse(GROUP_INFO))
     owners, members = await _chan().group_participants(GROUP)
     assert owners == (OWNER,)
     flat = repr((owners, members))
+    # the fetchInstances secret/line and the room's third-party name never leave the method
     assert SECRET_TOKEN not in flat and "token" not in flat and "number" not in flat
+    assert SUBJECT not in flat and "subject" not in flat

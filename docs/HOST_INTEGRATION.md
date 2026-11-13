@@ -169,7 +169,8 @@ buffer) reads a reply to one of them as a call to the bot.
 To learn the bot's own LID for `mentions_bot`, call **`await channel.group_participants(group_jid)`**
 beside a room's registration (never on a turn): it returns `(owner_jids, members)` — the `ownerJid`
 of every `fetchInstances` item whose `name == instance` (a tuple) and the room's `(id, phoneNumber)`
-members. Apply «exactly one, or nothing»: with exactly one owner candidate, the bot's LID is the
+members from `GET /group/findGroupInfos` (one flat object; its `subject`, the room's name, is never
+read or logged). Apply «exactly one, or nothing»: with exactly one owner candidate, the bot's LID is the
 `id` of the one member whose `phoneNumber` matches it; 0 or more than one owner, or 0 or more than
 one matching member, is ambiguous — store nothing. A message whose `mentioned_ids` contains the
 stored LID called the bot. Any read failure yields `((), ())` — store no LID and a mention cannot

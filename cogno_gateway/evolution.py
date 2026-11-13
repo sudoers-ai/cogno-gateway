@@ -237,9 +237,11 @@ class EvolutionChannel:
            ambiguous and never guessed; never the first of several). The item also carries
            ``token`` (a secret) and ``number`` (a line): neither is ever read, returned or logged —
            only ``name`` and ``ownerJid`` are.
-        2. ``GET /group/participants/{instance}?groupJid=<group>`` →
-           ``{"participants": [{"id": "<lid>@lid", "phoneNumber": "<phone>@s.whatsapp.net", …}]}``;
-           returned as ``(id, phoneNumber)`` pairs, verbatim.
+        2. ``GET /group/findGroupInfos/{instance}?groupJid=<group>`` → ONE flat object with
+           ``participants: [{"id": "<lid>@lid", "phoneNumber": "<phone>@s.whatsapp.net", …}]``
+           (measured 2026-11-13; it also carries ``subject``, the room's name — third-party text,
+           never read here or logged). The members are returned as ``(id, phoneNumber)`` pairs,
+           verbatim; ``subject`` and the other fields are not read.
 
         Any failure (non-2xx, unreadable, timeout) → ``((), ())``: the host then stores no
         ``bot_lid`` and a mention never fires — the room is deaf and the host says so, never a
@@ -251,7 +253,7 @@ class EvolutionChannel:
                     f"{self._base}/instance/fetchInstances",
                     headers=self._headers(), params={"instanceName": self._instance})
                 gp = await client.get(
-                    f"{self._base}/group/participants/{self._instance}",
+                    f"{self._base}/group/findGroupInfos/{self._instance}",
                     headers=self._headers(), params={"groupJid": group_jid})
         except Exception as exc:  # noqa: BLE001 — a read that cannot complete is unknown, not a crash
             logger.warning("channel=whatsapp event=group_participants_failed error=%s",

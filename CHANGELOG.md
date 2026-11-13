@@ -13,8 +13,9 @@
 - **A new `EvolutionChannel.group_participants(group_jid)` read** — the two network reads a host
   asks BESIDE a room's registration (never on a turn) to learn the bot's own LID: `GET
   /instance/fetchInstances?instanceName=<instance>` (a LIST of flat items; the `ownerJid` of every
-  item whose `name == self.instance`, as a tuple) and `GET /group/participants/{instance}?groupJid=
-  <group>` (the `(id, phoneNumber)` members). It returns `(owner_jids, members)` for the host's
+  item whose `name == self.instance`, as a tuple) and `GET /group/findGroupInfos/{instance}?groupJid=
+  <group>` (one flat object; the `(id, phoneNumber)` members — its `subject`, the room's third-party
+  name, is never read or logged). It returns `(owner_jids, members)` for the host's
   pure matcher, which applies «exactly one, or nothing» (the gateway surfaces the raw candidates so
   the host can tell a 0-match from an ambiguous >1 — never the first of several). Any failure yields
   `((), ())` (the host then stores no `bot_lid` and a mention cannot fire). The item's `token` (a
