@@ -222,7 +222,7 @@ class EvolutionChannel:
                 raise GatewayError(f"Evolution returned no base64 for message {ref.ref!r}")
             return base64.b64decode(b64)
 
-    # ── group participants + own owner candidates (W4 mention; host picks the bot's LID) ──
+    # ── group participants + own owner candidates (a WhatsApp mention; the host picks the bot's LID) ──
     async def group_participants(
         self, group_jid: str, *, timeout: float = 3.0
     ) -> "tuple[tuple[str, ...], tuple[tuple[str, str], ...]]":
@@ -277,7 +277,8 @@ class EvolutionChannel:
         for it in items:
             if not isinstance(it, dict):
                 continue
-            inner = it.get("instance") if isinstance(it.get("instance"), dict) else it
+            nested = it.get("instance")
+            inner = nested if isinstance(nested, dict) else it
             name = str(inner.get("name", inner.get("instanceName", "")) or "")
             if name == self._instance:
                 owners.append(str(inner.get("ownerJid", "") or ""))

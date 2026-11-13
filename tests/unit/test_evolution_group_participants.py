@@ -1,8 +1,8 @@
 """``EvolutionChannel.group_participants`` — the two reads a host asks beside a room's registration
-to learn the bot's own LID for a WhatsApp @mention (W4).
+to learn the bot's own LID for a WhatsApp @mention.
 
-The shapes here are COPIED from a real capture (``fetch_instances_forma_real.json`` /
-``group_info_forma_real.json``): the ``fetchInstances`` body is a LIST of FLAT items, each with a
+The shapes here are COPIED from a real capture of both reads: the ``fetchInstances`` body is a
+LIST of FLAT items, each with a
 ``name`` and an ``ownerJid`` (``<digits>@s.whatsapp.net``, no ``:<n>``) beside a ``token`` (a secret)
 and a ``number``; the ``findGroupInfos`` body is ONE flat object carrying ``subject`` (the room's
 name, third-party text — never read or logged) and ``participants: [{"id": "<lid>@lid",
