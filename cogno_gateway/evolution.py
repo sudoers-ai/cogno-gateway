@@ -140,6 +140,7 @@ class EvolutionChannel:
         group_conversation_id = ""
         group_author = ""
         reply_to_message_id = ""
+        group_mentioned_ids: tuple[str, ...] = ()
         if is_group:
             # The AUTHOR. `key.participant` is ALWAYS `<lid>@lid` (addressingMode="lid"); the
             # routable phone is the bridge `key.participantAlt = <phone>@s.whatsapp.net`. Invariant
@@ -158,11 +159,16 @@ class EvolutionChannel:
             # sibling of `message` (`data.contextInfo`) — null on a plain message, carrying
             # `stanzaId` on a reply — read independently of `messageType`. The parser only exposes
             # the id; the HOST decides `reply_to_bot` against the room's buffer (`bot:<id>` lines).
-            # `mentions_bot` is deliberately NOT set: the mention is by the bot's own LID, which
-            # this library does not yet know (mention detection waits for that).
+            # `mentions_bot` is deliberately NOT set: a WhatsApp mention is by the bot's own LID,
+            # which the PURE parser does not know. The parser only EXPOSES the mentioned LIDs
+            # (`contextInfo.mentionedJid`, additive) in `mentioned_ids`, verbatim; the HOST decides
+            # `mentions_bot` by matching them against the room's stored `bot_lid`.
             ctx = data.get("contextInfo")
             if isinstance(ctx, dict):
                 reply_to_message_id = str(ctx.get("stanzaId", "") or "")
+                mentioned = ctx.get("mentionedJid")
+                if isinstance(mentioned, list):
+                    group_mentioned_ids = tuple(str(j) for j in mentioned if j)
         message_id = str(key.get("id", ""))
         msg = data.get("message", {}) or {}
         msg_type = data.get("messageType", "")
@@ -174,7 +180,8 @@ class EvolutionChannel:
                                   message_id=message_id, text=text, media=media,
                                   reaction=reaction, selection=selection, raw=data,
                                   conversation_id=group_conversation_id, author=group_author,
-                                  reply_to_message_id=reply_to_message_id)
+                                  reply_to_message_id=reply_to_message_id,
+                                  mentioned_ids=group_mentioned_ids)
 
         if "reactionMessage" in msg:
             rm = msg["reactionMessage"]
@@ -214,6 +221,81 @@ class EvolutionChannel:
             if not b64:
                 raise GatewayError(f"Evolution returned no base64 for message {ref.ref!r}")
             return base64.b64decode(b64)
+
+    # ── group participants + own owner candidates (W4 mention; host picks the bot's LID) ──
+    async def group_participants(
+        self, group_jid: str, *, timeout: float = 3.0
+    ) -> "tuple[tuple[str, ...], tuple[tuple[str, str], ...]]":
+        """This instance's ``ownerJid`` CANDIDATES and a room's members, for the host to pick the
+        bot's own LID and decide a WhatsApp @mention. Two reads, no retry, a short timeout: a host
+        asks it beside a room's registration, NEVER on a turn.
+
+        1. ``GET /instance/fetchInstances?instanceName=<instance>`` → a LIST of FLAT items
+           (measured 2026-11-12). The ``ownerJid`` of EVERY item whose ``name == self._instance``
+           is returned, as a tuple — our own filter, since the server's ``?instanceName=`` was not
+           proved to narrow. The host applies «exactly one, or nothing» (0 or more than 1 is
+           ambiguous and never guessed; never the first of several). The item also carries
+           ``token`` (a secret) and ``number`` (a line): neither is ever read, returned or logged —
+           only ``name`` and ``ownerJid`` are.
+        2. ``GET /group/participants/{instance}?groupJid=<group>`` →
+           ``{"participants": [{"id": "<lid>@lid", "phoneNumber": "<phone>@s.whatsapp.net", …}]}``;
+           returned as ``(id, phoneNumber)`` pairs, verbatim.
+
+        Any failure (non-2xx, unreadable, timeout) → ``((), ())``: the host then stores no
+        ``bot_lid`` and a mention never fires — the room is deaf and the host says so, never a
+        guessed LID. The owner/member matching and the ``bot_lid`` choice are the host's PURE
+        function; this method only reads."""
+        try:
+            async with build_async_client(self._cfg, timeout=timeout) as client:
+                fi = await client.get(
+                    f"{self._base}/instance/fetchInstances",
+                    headers=self._headers(), params={"instanceName": self._instance})
+                gp = await client.get(
+                    f"{self._base}/group/participants/{self._instance}",
+                    headers=self._headers(), params={"groupJid": group_jid})
+        except Exception as exc:  # noqa: BLE001 — a read that cannot complete is unknown, not a crash
+            logger.warning("channel=whatsapp event=group_participants_failed error=%s",
+                           type(exc).__name__)
+            return (), ()
+        return self._own_owner_jids(fi), self._members_of(gp)
+
+    def _own_owner_jids(self, resp: "httpx.Response") -> "tuple[str, ...]":
+        """The ``ownerJid`` of EVERY fetchInstances item whose ``name == self._instance`` (our own
+        filter). The body is a LIST of flat items (measured); a nested ``{instance: {…}}`` item is
+        tolerated too. ``token``/``number`` are never read. The «exactly one, or nothing» rule is
+        the host's — it needs the count to tell 0 (no match) from >1 (ambiguous)."""
+        if resp.status_code // 100 != 2:
+            return ()
+        try:
+            body = resp.json()
+        except Exception:  # noqa: BLE001 — unreadable body → nothing
+            return ()
+        items = body if isinstance(body, list) else [body]
+        owners: list[str] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            inner = it.get("instance") if isinstance(it.get("instance"), dict) else it
+            name = str(inner.get("name", inner.get("instanceName", "")) or "")
+            if name == self._instance:
+                owners.append(str(inner.get("ownerJid", "") or ""))
+        return tuple(owners)
+
+    @staticmethod
+    def _members_of(resp: "httpx.Response") -> "tuple[tuple[str, str], ...]":
+        """``(id, phoneNumber)`` for each participant, verbatim; ``()`` on any non-2xx / unreadable
+        / shapeless body."""
+        if resp.status_code // 100 != 2:
+            return ()
+        try:
+            body = resp.json()
+        except Exception:  # noqa: BLE001
+            return ()
+        parts = body.get("participants") if isinstance(body, dict) else body
+        if not isinstance(parts, list):
+            return ()
+        return tuple((str(p.get("id", "") or ""), str(p.get("phoneNumber", "") or ""))
+                     for p in parts if isinstance(p, dict))
 
     async def _post(self, client: "httpx.AsyncClient", url: str, **kwargs):
         """One send POST, retried only on the write-safe failures (see cogno_gateway.retry):

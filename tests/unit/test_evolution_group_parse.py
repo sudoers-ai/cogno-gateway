@@ -157,6 +157,27 @@ def test_on_a_mention_only_message_has_no_quoted_id_and_no_mentions_bot():
     assert msg.mentions_bot is False             # mention detection needs the bot's own LID
 
 
+# ── ON: the mentioned LIDs are EXPOSED (mentioned_ids), verbatim; the host decides mentions_bot ──
+def test_on_a_mention_exposes_the_mentioned_lids_verbatim():
+    msg = EvolutionChannel(_cfg(True)).parse_inbound(MSG_MENTION)
+    assert isinstance(msg, InboundMessage)
+    assert msg.mentioned_ids == (OTHER_LID,)     # the LID, @lid, never the phone — matched by the host
+    assert msg.mentions_bot is False             # the pure parser does not know the bot's own LID
+
+
+def test_on_reply_plus_mention_exposes_both_the_quoted_id_and_the_mentioned_lids():
+    msg = EvolutionChannel(_cfg(True)).parse_inbound(MSG_REPLY_MENTION)
+    assert isinstance(msg, InboundMessage)
+    assert msg.mentioned_ids == (OTHER_LID,)
+    assert msg.reply_to_message_id == "3EB00000000000000000000000000002"
+
+
+@pytest.mark.parametrize("label", ["plain", "reply"])
+def test_on_a_message_with_no_mention_has_empty_mentioned_ids(label):
+    msg = EvolutionChannel(_cfg(True)).parse_inbound(REAL_FOUR[label])
+    assert isinstance(msg, InboundMessage) and msg.mentioned_ids == ()
+
+
 def test_on_reply_plus_mention_exposes_the_quoted_id_and_still_no_mentions_bot():
     msg = EvolutionChannel(_cfg(True)).parse_inbound(MSG_REPLY_MENTION)
     assert isinstance(msg, InboundMessage)

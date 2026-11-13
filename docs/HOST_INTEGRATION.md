@@ -82,6 +82,7 @@ Cloud adapter drops a message whose object carries a `group_id` (every kind; sin
 | `mentions_bot` | `False` | the text @-mentions this bot (meaningful only in a group) |
 | `reply_to_bot` | `False` | it replies to one of this bot's messages (only in a group) |
 | `reply_to_message_id` | `""` | the provider id this message QUOTES (Evolution `data.contextInfo.stanzaId`), exposed so a host can decide `reply_to_bot` itself (since 0.1.9) |
+| `mentioned_ids` | `()` | the LIDs this message @-mentions (Evolution `data.contextInfo.mentionedJid`), exposed so a host can decide `mentions_bot` against the bot's own LID (since 0.1.10) |
 | `author_is_bot` | `False` | the author is a bot |
 | `membership` | `None` | set only on a `MessageKind.MEMBERSHIP` message: THIS bot joined or left the room (0.1.6) |
 
@@ -154,15 +155,26 @@ arrives with:
 | `author` | `key.participantAlt` — the member's PHONE JID (`<phone>@s.whatsapp.net`). `key.participant` is always the member's `<lid>@lid`, which does NOT route, so it is never the author |
 | `author_is_bot` | `False` (WhatsApp has no `is_bot`) |
 | `reply_to_message_id` | `data.contextInfo.stanzaId` — the id of the message this one quotes (a top-level sibling of `message`, null on a plain message), exposed so a host can decide `reply_to_bot` against its own record of what it sent |
+| `mentioned_ids` | `data.contextInfo.mentionedJid` — the LIDs (`<digits>@lid`) the message @-mentions, verbatim (since 0.1.10), exposed so a host can decide `mentions_bot` against the bot's own LID |
 
 The author comes ONLY from a phone JID: **a group message with no `key.participantAlt`, or one that
 is not a `@s.whatsapp.net` JID, is dropped** (there is no `@lid`→phone bridge to route it). `key.
-fromMe` still drops (the bot's own echo). `mentions_bot` is NOT set yet: a WhatsApp @mention names
-the bot by its own `@lid`, which this library does not yet carry, so a mention-triggered turn is a
-host decision made elsewhere until then. **`reply_to_bot` is yours to decide from
-`reply_to_message_id`**: the parser is pure and does not know which ids are the bot's own — a host
-that keeps a short record of the ids it sent to a room (as the Cogno host does, in its room buffer)
-reads a reply to one of them as a call to the bot.
+fromMe` still drops (the bot's own echo). `mentions_bot` is NOT set by the parser: a WhatsApp
+@mention names the bot by its own `@lid`, which the pure parser does not know, so it only EXPOSES
+the mentioned LIDs in `mentioned_ids` and the HOST decides the mention. **`reply_to_bot` is yours to
+decide from `reply_to_message_id`**: the parser is pure and does not know which ids are the bot's own
+— a host that keeps a short record of the ids it sent to a room (as the Cogno host does, in its room
+buffer) reads a reply to one of them as a call to the bot.
+
+To learn the bot's own LID for `mentions_bot`, call **`await channel.group_participants(group_jid)`**
+beside a room's registration (never on a turn): it returns `(owner_jids, members)` — the `ownerJid`
+of every `fetchInstances` item whose `name == instance` (a tuple) and the room's `(id, phoneNumber)`
+members. Apply «exactly one, or nothing»: with exactly one owner candidate, the bot's LID is the
+`id` of the one member whose `phoneNumber` matches it; 0 or more than one owner, or 0 or more than
+one matching member, is ambiguous — store nothing. A message whose `mentioned_ids` contains the
+stored LID called the bot. Any read failure yields `((), ())` — store no LID and a mention cannot
+fire (never a guessed LID). The `fetchInstances` item's `token` and `number` are never read,
+returned or logged.
 
 ---
 

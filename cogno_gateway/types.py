@@ -208,7 +208,16 @@ class InboundMessage:
     #   the member who wrote it (Evolution `key.participant`, Telegram `from.id`).
     #   "" = the sender is the author, which is always true of a 1:1 message.
     mentions_bot: bool = field(default=False, kw_only=True)
-    #   the text @-mentions this bot. Meaningful only with ``conversation_id`` set.
+    #   the text @-mentions this bot. Meaningful only with ``conversation_id`` set. Telegram fills
+    #   it at parse (it knows its own ``@handle``); Evolution cannot — a WhatsApp mention is by the
+    #   bot's own LID, which the pure parser does not know — so there it stays False and the HOST
+    #   decides it from ``mentioned_ids`` against the room's stored ``bot_lid``.
+    mentioned_ids: tuple[str, ...] = field(default=(), kw_only=True)
+    #   the LIDs (``<digits>@lid``) this message @-mentions, verbatim from Evolution
+    #   ``data.contextInfo.mentionedJid`` (a WhatsApp mention is by LID, not by phone). A host
+    #   matches them against the bot's own LID to decide ``mentions_bot`` itself, which the pure
+    #   parser cannot. ``()`` = the message mentions nobody. Meaningful only in a group; reserved
+    #   like the fields above (hidden from ``repr`` at its default, see ``_GROUP_FIELDS``).
     reply_to_bot: bool = field(default=False, kw_only=True)
     #   the message replies to one of this bot's own messages. Meaningful only in a group.
     #   Telegram fills it at parse (it carries the quoted message's author); Evolution cannot —
@@ -244,11 +253,12 @@ class InboundMessage:
 
 # The reserved group fields above, by name — the ones ``InboundMessage.__repr__`` leaves out at
 # their default. One definition, read by the repr and by the tests that pin the inertness.
-# ``reply_to_message_id`` joined in 0.1.9 (the quoted id a host reads to decide
-# ``reply_to_bot``): it is additive and default on every 1:1 message, so hiding it at its default
-# keeps a 1:1 message's repr byte for byte as before the field existed.
-_GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "reply_to_bot", "reply_to_message_id",
-                 "author_is_bot", "membership")
+# ``reply_to_message_id`` joined in 0.1.9 (the quoted id a host reads to decide ``reply_to_bot``)
+# and ``mentioned_ids`` in 0.1.10 (the LIDs a host reads to decide ``mentions_bot``): each is
+# additive and default on every 1:1 message (``()`` for ``mentioned_ids``), so hiding it at its
+# default keeps a 1:1 message's repr byte for byte as before the field existed.
+_GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "mentioned_ids", "reply_to_bot",
+                 "reply_to_message_id", "author_is_bot", "membership")
 
 
 @dataclass

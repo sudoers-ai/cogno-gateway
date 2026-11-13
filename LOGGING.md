@@ -39,6 +39,13 @@ veja `cogno/core/logging.py` no host como referência.
   5xx de um proxy) esse texto era o erro inteiro, e a linha levava o token. A razão com
   as palavras do Telegram vai para o host em `SendResult.error`, com o token mascarado
   como `[token]` (`/bot[token]/`), em claro e percent-encoded.
+- **O `event=group_participants_failed` do Evolution traz SÓ `error=<classe>`.** É a única
+  linha de `EvolutionChannel.group_participants` (a leitura que um host faz ao lado do registo
+  de uma sala para aprender o LID próprio do bot, nunca num turno). Dispara em qualquer falha das
+  duas leituras (`fetchInstances` / `group/participants`) e leva apenas a CLASSE da excepção —
+  nunca o `str(exc)`, nunca o `apikey` do header, e **nunca o `token`/`number` do item de
+  `fetchInstances`** (desse item só se lêem `name` e `ownerJid`; o segredo e o número nem são
+  lidos). Não há linha de caminho feliz: o sucesso devolve `(ownerJid, membros)` sem registar nada.
 - **O logger `httpx` é do host, e escreve o URL com o token.** O httpx regista cada
   pedido em INFO (`HTTP Request: POST https://api.telegram.org/bot<TOKEN>/…`), também os
   que correm bem. Esta lib não mexe no nível de um logger alheio (regra 1); um host que
