@@ -170,6 +170,8 @@ async def test_a_transport_failure_logs_the_class_on_both_lines(telegram_answers
     (OutboundMessage(reaction=Reaction("👍", "7")), "setMessageReaction"),
     (OutboundMessage(audio=b"OPUS", audio_format="ogg"), "sendVoice"),
     (OutboundMessage(media=[MediaRef(url="http://x.invalid/a.pdf")]), "sendDocument"),
+    (OutboundMessage(media=[MediaRef(url="http://x.invalid/a.png", mime="image/png")]),
+     "sendPhoto"),
 ])
 async def test_every_bot_api_call_fails_without_the_token(telegram_answers, caplog, message,
                                                           endpoint):

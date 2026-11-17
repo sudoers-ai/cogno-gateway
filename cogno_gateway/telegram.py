@@ -34,6 +34,7 @@ from cogno_gateway.types import (
     OutboundMessage,
     Reaction,
     SendResult,
+    image_mime,
 )
 
 logger = logging.getLogger("cogno_gateway.telegram")
@@ -548,9 +549,16 @@ class TelegramChannel:
                                          "audio/ogg")})
                     ids.append(str(resp.json().get("result", {}).get("message_id", "")))
                 for m in message.media:
-                    resp = await self._post(client, f"{_API}/bot{self._token}/sendDocument",
-                                            json={"chat_id": recipient,
-                                                  "document": m.url or m.ref})
+                    if image_mime(m.mime):
+                        body = {"chat_id": recipient, "photo": m.url or m.ref}
+                        if m.caption:
+                            body["caption"] = m.caption
+                        resp = await self._post(
+                            client, f"{_API}/bot{self._token}/sendPhoto", json=body)
+                    else:
+                        resp = await self._post(
+                            client, f"{_API}/bot{self._token}/sendDocument",
+                            json={"chat_id": recipient, "document": m.url or m.ref})
                     ids.append(str(resp.json().get("result", {}).get("message_id", "")))
             except httpx.HTTPError as exc:
                 # The log line names what happened by CLASS and STATUS only, never by text the

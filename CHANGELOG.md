@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.12 — 2026-11-17
+
+### Added
+- **An outbound JPEG or PNG now sends as a VISIBLE IMAGE, not as a document attachment, on all
+  three provider adapters.** A new single definition in `cogno_gateway.types` —
+  `IMAGE_MIMES = {"image/jpeg", "image/png"}` and `image_mime(mime)` (normalizes case and drops
+  MIME parameters, returning `""` for anything else) — decides it. `EvolutionChannel` sends
+  `sendMedia` with `mediatype: "image"` and the same four body keys as a document — no `mimetype`
+  and no `fileName`, since the server reads the picture's type from the bytes it downloads and a
+  file name would make it re-derive the type from the name; `TelegramChannel` calls `sendPhoto`
+  (with the caption when present) instead of `sendDocument`; `WhatsAppCloudChannel` sends
+  `type: "image"`. Anything else — WebP,
+  PDF, or no MIME at all — still goes as a document, byte-for-byte as before. Both names are
+  exported from the package.
+
 ## 0.1.11 — 2026-11-17
 
 ### Added

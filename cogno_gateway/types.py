@@ -14,6 +14,20 @@ from enum import Enum
 from typing import Optional
 
 
+# The MIME types every adapter sends as a visible IMAGE (WhatsApp `sendMedia` with
+# `mediatype: image`, Telegram `sendPhoto`, Cloud API `type: image`). JPEG and PNG are the formats
+# all three providers document for a photo; anything else — WebP included, or no MIME at all —
+# still goes as a document, exactly as before.
+IMAGE_MIMES = frozenset({"image/jpeg", "image/png"})
+
+
+def image_mime(mime: str) -> str:
+    """The normalized MIME (lower case, parameters dropped) when ``mime`` is sent as a visible
+    image; ``""`` otherwise."""
+    base = (mime or "").split(";", 1)[0].strip().lower()
+    return base if base in IMAGE_MIMES else ""
+
+
 class MessageKind(str, Enum):
     TEXT = "text"
     IMAGE = "image"
@@ -264,7 +278,8 @@ _GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "mentioned_ids", "
 @dataclass
 class OutboundMessage:
     """A reply to send back. ``audio`` carries voice-note bytes (e.g. from a
-    cogno-vox TTS); ``media`` carries documents/images to attach."""
+    cogno-vox TTS); ``media`` carries files to attach: a JPEG or PNG
+    (``IMAGE_MIMES``) goes as a visible image, anything else as a document."""
 
     text: str = ""
     audio: Optional[bytes] = None
