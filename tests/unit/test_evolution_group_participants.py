@@ -127,3 +127,65 @@ async def test_the_token_number_and_subject_are_never_in_the_return(fake_httpx):
     # the fetchInstances secret/line and the room's third-party name never leave the method
     assert SECRET_TOKEN not in flat and "token" not in flat and "number" not in flat
     assert SUBJECT not in flat and "subject" not in flat
+
+
+# ── group_info: owners + members + the room's subject, from the SAME findGroupInfos read ─────────
+async def test_group_info_returns_owners_members_and_the_subject(fake_httpx):
+    _routes(fake_httpx, fetch=FakeResponse(FI_ONE), participants=FakeResponse(GROUP_INFO))
+    owners, members, subject = await _chan().group_info(GROUP)
+    assert owners == (OWNER,)
+    assert members == ((AUTHOR_LID, AUTHOR_PHONE), (BOT_LID, OWNER))
+    assert subject == SUBJECT                          # the room's name, verbatim, for the host
+
+
+async def test_group_info_adds_no_network_call_over_group_participants(fake_httpx):
+    """Exactly two reads — fetchInstances and findGroupInfos — the same the participants read made;
+    the subject rides the findGroupInfos body, never a third call."""
+    _routes(fake_httpx, fetch=FakeResponse(FI_ONE), participants=FakeResponse(GROUP_INFO))
+    before = len(fake_httpx.calls)
+    await _chan().group_info(GROUP)
+    urls = [c["url"] for c in fake_httpx.calls[before:]]
+    assert sum("fetchInstances" in u for u in urls) == 1
+    assert sum("findGroupInfos" in u for u in urls) == 1
+    assert len(urls) == 2
+
+
+async def test_group_info_without_a_subject_yields_empty_string(fake_httpx):
+    no_subject = {k: v for k, v in GROUP_INFO.items() if k != "subject"}
+    _routes(fake_httpx, fetch=FakeResponse(FI_ONE), participants=FakeResponse(no_subject))
+    owners, members, subject = await _chan().group_info(GROUP)
+    assert owners == (OWNER,) and members == ((AUTHOR_LID, AUTHOR_PHONE), (BOT_LID, OWNER))
+    assert subject == ""                               # absent field → no name, never a guess
+
+
+async def test_group_info_non_2xx_findgroupinfos_yields_empty_members_and_subject(fake_httpx):
+    _routes(fake_httpx, fetch=FakeResponse(FI_ONE), participants=FakeResponse(status=404))
+    owners, members, subject = await _chan().group_info(GROUP)
+    assert owners == (OWNER,) and members == () and subject == ""
+
+
+async def test_group_info_transport_failure_yields_empty_everything(fake_httpx, caplog):
+    _routes(fake_httpx, fetch=httpx.ConnectError("down"), participants=FakeResponse(GROUP_INFO))
+    with caplog.at_level("WARNING", logger="cogno_gateway.evolution"):
+        owners, members, subject = await _chan().group_info(GROUP)
+    assert (owners, members, subject) == ((), (), "")
+
+
+async def test_group_info_never_logs_the_subject(fake_httpx, caplog):
+    """A read that logs at all (the transport-failure warning) carries the error CLASS, never the
+    room's third-party name."""
+    _routes(fake_httpx, fetch=httpx.ConnectError("down"), participants=FakeResponse(GROUP_INFO))
+    with caplog.at_level("WARNING", logger="cogno_gateway.evolution"):
+        await _chan().group_info(GROUP)
+    assert SUBJECT not in caplog.text and "subject" not in caplog.text
+
+
+async def test_group_participants_wraps_group_info_and_drops_the_subject(fake_httpx):
+    """The wrapper returns a 2-tuple — an older host that unpacks ``(owners, members)`` is unchanged
+    — and the subject never reaches it."""
+    _routes(fake_httpx, fetch=FakeResponse(FI_ONE), participants=FakeResponse(GROUP_INFO))
+    result = await _chan().group_participants(GROUP)
+    assert len(result) == 2
+    owners, members = result
+    assert owners == (OWNER,) and members == ((AUTHOR_LID, AUTHOR_PHONE), (BOT_LID, OWNER))
+    assert SUBJECT not in repr(result)
