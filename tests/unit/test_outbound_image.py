@@ -156,7 +156,7 @@ async def test_g5_cloud_image_failure_is_reported(fake_httpx):
 # ── C1: the DOCUMENT body is byte-identical to the base (keys and order) ─────
 @pytest.mark.parametrize("mime", ["", "application/pdf"])
 async def test_c1_evolution_document_body_unchanged(fake_httpx, mime):
-    fake_httpx.routes = {"/sendMedia/": FakeResponse({"key": {"id": "D1"}})}
+    fake_httpx.routes = {"/sendMedia/": FakeResponse({"key": {"id": "doc-1"}})}
     await _evo().send(_EVO_TO, OutboundMessage(
         media=[MediaRef(url="https://media.example.invalid/doc.pdf", mime=mime, caption=_CAP)]))
     body = body_of(_calls(fake_httpx, "sendMedia")[0])
@@ -179,7 +179,7 @@ async def test_c1_telegram_document_body_unchanged(fake_httpx, mime):
 
 @pytest.mark.parametrize("mime", ["", "application/pdf"])
 async def test_c1_cloud_document_body_unchanged(fake_httpx, mime):
-    fake_httpx.routes = {"/messages": FakeResponse({"messages": [{"id": "D1"}]})}
+    fake_httpx.routes = {"/messages": FakeResponse({"messages": [{"id": "doc-1"}]})}
     await _cloud().send(_CLOUD_TO, OutboundMessage(
         media=[MediaRef(url="https://media.example.invalid/doc.pdf", mime=mime, caption=_CAP)]))
     body = body_of(_calls(fake_httpx, "/messages")[0])
@@ -247,7 +247,7 @@ async def test_c3_cloud_mixed_image_then_document(fake_httpx):
     from tests.conftest import Script
     fake_httpx.routes = {"/messages": Script(
         FakeResponse({"messages": [{"id": "I1"}]}),
-        FakeResponse({"messages": [{"id": "D2"}]}),
+        FakeResponse({"messages": [{"id": "doc-2"}]}),
     )}
     res = await _cloud().send(_CLOUD_TO, OutboundMessage(media=[_PNG, _PDF]))
     sent = _calls(fake_httpx, "/messages")
@@ -256,4 +256,4 @@ async def test_c3_cloud_mixed_image_then_document(fake_httpx):
     assert body_of(sent[0])["image"]["link"] == _PNG.url
     assert body_of(sent[1])["type"] == "document"
     assert body_of(sent[1])["document"]["link"] == _PDF.url
-    assert res.message_ids == ["I1", "D2"]
+    assert res.message_ids == ["I1", "doc-2"]
