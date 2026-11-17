@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.11 — 2026-11-17
+
+### Added
+- **A new `EvolutionChannel.group_info(group_jid)` read — the room's `subject` (its name) beside
+  the owner candidates and members, from the SAME `findGroupInfos` call (ZERO extra network
+  calls).** It returns `(owner_jids, members, subject)`: `subject` is the room's WhatsApp name,
+  returned verbatim as a string for the host to VALIDATE before it ever becomes a name. `subject`
+  is THIRD-PARTY text — never read for a decision here and NEVER logged (the only log line stays
+  the transport-failure warning, which carries the error class alone). Any failure (non-2xx,
+  unreadable, timeout) yields `((), (), "")`.
+
+### Changed
+- **`EvolutionChannel.group_participants(group_jid)` is now a thin WRAPPER over `group_info` that
+  DROPS the `subject`**, returning `(owner_jids, members)` exactly as before — an older host that
+  unpacks the 2-tuple is unchanged, while a newer host calls `group_info` and also learns the
+  room's name from the same read.
+
 ## 0.1.10 — 2026-11-13
 
 ### Added

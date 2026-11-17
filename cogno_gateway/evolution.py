@@ -222,13 +222,15 @@ class EvolutionChannel:
                 raise GatewayError(f"Evolution returned no base64 for message {ref.ref!r}")
             return base64.b64decode(b64)
 
-    # ── group participants + own owner candidates (a WhatsApp mention; the host picks the bot's LID) ──
-    async def group_participants(
+    # ── group info: own owner candidates + members + the room's subject (one findGroupInfos read) ──
+    async def group_info(
         self, group_jid: str, *, timeout: float = 3.0
-    ) -> "tuple[tuple[str, ...], tuple[tuple[str, str], ...]]":
-        """This instance's ``ownerJid`` CANDIDATES and a room's members, for the host to pick the
-        bot's own LID and decide a WhatsApp @mention. Two reads, no retry, a short timeout: a host
-        asks it beside a room's registration, NEVER on a turn.
+    ) -> "tuple[tuple[str, ...], tuple[tuple[str, str], ...], str]":
+        """This instance's ``ownerJid`` CANDIDATES, a room's members, and the room's ``subject``
+        (its name), for the host to pick the bot's own LID, decide a WhatsApp @mention, and name a
+        room that has none yet. Two reads, no retry, a short timeout: a host asks it beside a room's
+        registration, NEVER on a turn. No extra network call over :meth:`group_participants` — the
+        SAME ``findGroupInfos`` read carries ``subject`` already.
 
         1. ``GET /instance/fetchInstances?instanceName=<instance>`` → a LIST of FLAT items
            (measured 2026-11-12). The ``ownerJid`` of EVERY item whose ``name == self._instance``
@@ -238,15 +240,17 @@ class EvolutionChannel:
            ``token`` (a secret) and ``number`` (a line): neither is ever read, returned or logged —
            only ``name`` and ``ownerJid`` are.
         2. ``GET /group/findGroupInfos/{instance}?groupJid=<group>`` → ONE flat object with
+           ``subject`` (the room's name) and
            ``participants: [{"id": "<lid>@lid", "phoneNumber": "<phone>@s.whatsapp.net", …}]``
-           (measured 2026-11-13; it also carries ``subject``, the room's name — third-party text,
-           never read here or logged). The members are returned as ``(id, phoneNumber)`` pairs,
-           verbatim; ``subject`` and the other fields are not read.
+           (measured 2026-11-13). The members are returned as ``(id, phoneNumber)`` pairs,
+           verbatim; ``subject`` is returned as a string for the host to VALIDATE before it ever
+           becomes a name. ``subject`` is THIRD-PARTY text: it is never read for any decision here
+           and NEVER logged.
 
-        Any failure (non-2xx, unreadable, timeout) → ``((), ())``: the host then stores no
-        ``bot_lid`` and a mention never fires — the room is deaf and the host says so, never a
-        guessed LID. The owner/member matching and the ``bot_lid`` choice are the host's PURE
-        function; this method only reads."""
+        Any failure (non-2xx, unreadable, timeout) → ``((), (), "")``: the host then stores no
+        ``bot_lid``, a mention never fires and no name is taken — the room is deaf and the host says
+        so, never a guessed LID. The owner/member matching, the ``bot_lid`` choice and the name
+        decision are the host's PURE functions; this method only reads."""
         try:
             async with build_async_client(self._cfg, timeout=timeout) as client:
                 fi = await client.get(
@@ -258,8 +262,18 @@ class EvolutionChannel:
         except Exception as exc:  # noqa: BLE001 — a read that cannot complete is unknown, not a crash
             logger.warning("channel=whatsapp event=group_participants_failed error=%s",
                            type(exc).__name__)
-            return (), ()
-        return self._own_owner_jids(fi), self._members_of(gp)
+            return (), (), ""
+        return self._own_owner_jids(fi), self._members_of(gp), self._subject_of(gp)
+
+    async def group_participants(
+        self, group_jid: str, *, timeout: float = 3.0
+    ) -> "tuple[tuple[str, ...], tuple[tuple[str, str], ...]]":
+        """This instance's ``ownerJid`` CANDIDATES and a room's members — a WRAPPER over
+        :meth:`group_info` that DROPS the room's ``subject``, kept so an older host that reads only
+        ``(owners, members)`` keeps working. A newer host calls :meth:`group_info` and also learns
+        the subject, from the SAME read."""
+        owners, members, _subject = await self.group_info(group_jid, timeout=timeout)
+        return owners, members
 
     def _own_owner_jids(self, resp: "httpx.Response") -> "tuple[str, ...]":
         """The ``ownerJid`` of EVERY fetchInstances item whose ``name == self._instance`` (our own
@@ -299,6 +313,21 @@ class EvolutionChannel:
             return ()
         return tuple((str(p.get("id", "") or ""), str(p.get("phoneNumber", "") or ""))
                      for p in parts if isinstance(p, dict))
+
+    @staticmethod
+    def _subject_of(resp: "httpx.Response") -> str:
+        """The room's ``subject`` (its name) from the ``findGroupInfos`` body, verbatim — ``""`` on
+        any non-2xx / unreadable / shapeless body or absent field. THIRD-PARTY text: it is returned
+        for the host to validate, never read for a decision here and never logged."""
+        if resp.status_code // 100 != 2:
+            return ""
+        try:
+            body = resp.json()
+        except Exception:  # noqa: BLE001 — unreadable body → no subject
+            return ""
+        if not isinstance(body, dict):
+            return ""
+        return str(body.get("subject", "") or "")
 
     async def _post(self, client: "httpx.AsyncClient", url: str, **kwargs):
         """One send POST, retried only on the write-safe failures (see cogno_gateway.retry):
