@@ -188,12 +188,19 @@ await channel.send(msg.sender, OutboundMessage(text=reply_text))               #
 await channel.send(msg.sender, OutboundMessage(audio=tts_bytes,                # voice note (vox TTS)
                                                audio_format="opus"))
 await channel.send(msg.sender, OutboundMessage(media=[MediaRef(url="https://…/file.pdf")]))
+await channel.send(msg.sender, OutboundMessage(media=[MediaRef(url="https://…/chart.png",  # visible image
+                                                               mime="image/png")]))
 await channel.send(msg.sender, OutboundMessage(reaction=Reaction("👍", msg.message_id)))
 
 from cogno_gateway import Button                                                # quick-reply buttons
 await channel.send(msg.sender, OutboundMessage(text="Confirmar agendamento?",
     buttons=[Button("confirm", "Sim ✅"), Button("cancel", "Não ❌")]))
 ```
+
+A `MediaRef` whose `mime` is in `cogno_gateway.IMAGE_MIMES` (`image/jpeg`, `image/png`) is sent as
+a **visible image** on every channel (Telegram `sendPhoto`, WhatsApp `sendMedia` with
+`mediatype: image`, Cloud API `type: image`); any other MIME — WebP included — or none goes as a
+document attachment, as before.
 
 **Answering in a group (Telegram, 0.1.4):** send to `msg.sender` (the room) and set
 `reply_to_message_id=msg.message_id`. The first text chunk is threaded to that message

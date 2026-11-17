@@ -37,6 +37,7 @@ from cogno_gateway.types import (
     PresenceEvent,
     Reaction,
     SendResult,
+    image_mime,
 )
 
 logger = logging.getLogger("cogno_gateway.evolution")
@@ -390,11 +391,16 @@ class EvolutionChannel:
                         headers=self._headers(), json={"number": number, "audio": audio_b64})
                     ids.append(str(resp.json().get("key", {}).get("id", "")))
                 for m in message.media:
+                    # A JPEG or PNG goes out as a visible image; anything else as a document.
+                    # Only the ``mediatype`` differs: the server reads the picture's type from the
+                    # bytes it downloads, and a file name would make it re-derive the type from the
+                    # name instead. The DOCUMENT body is byte-identical to before.
                     resp = await self._post(client,
                         f"{self._base}/message/sendMedia/{self._instance}",
                         headers=self._headers(),
                         json={"number": number, "media": m.url or m.ref,
-                              "mediatype": "document", "caption": m.caption})
+                              "mediatype": "image" if image_mime(m.mime) else "document",
+                              "caption": m.caption})
                     ids.append(str(resp.json().get("key", {}).get("id", "")))
             except httpx.HTTPError as exc:
                 logger.warning("channel=whatsapp event=send_failed sent=%d error=%s", len(ids), exc)

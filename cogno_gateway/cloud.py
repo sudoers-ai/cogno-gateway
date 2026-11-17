@@ -52,6 +52,7 @@ from cogno_gateway.types import (
     OutboundMessage,
     Reaction,
     SendResult,
+    image_mime,
 )
 
 logger = logging.getLogger("cogno_gateway.cloud")
@@ -272,9 +273,10 @@ class WhatsAppCloudChannel:
                         "messaging_product": "whatsapp", "to": recipient, "type": "audio",
                         "audio": {"id": media_id}}))
                 for m in message.media:
+                    kind = "image" if image_mime(m.mime) else "document"
                     ids.append(await self._post(client, url, {
-                        "messaging_product": "whatsapp", "to": recipient, "type": "document",
-                        "document": {"link": m.url or m.ref, "caption": m.caption}}))
+                        "messaging_product": "whatsapp", "to": recipient, "type": kind,
+                        kind: {"link": m.url or m.ref, "caption": m.caption}}))
             except httpx.HTTPError as exc:
                 logger.warning("channel=whatsapp_cloud event=send_failed sent=%d error=%s",
                                len([i for i in ids if i]), exc)
