@@ -40,6 +40,7 @@ class MessageKind(str, Enum):
     STICKER = "sticker"
     INTERACTIVE = "interactive"   # a quick-reply / list / inline-button selection
     MEMBERSHIP = "membership"     # THIS bot joined or left a group (``InboundMessage.membership``)
+    POLL_VOTE = "poll_vote"       # a vote on a poll THIS bot sent (``InboundMessage.poll_vote``)
     UNKNOWN = "unknown"
 
 
@@ -214,6 +215,30 @@ class Poll:
             seen.add(key)
 
 
+@dataclass(frozen=True)
+class PollVote:
+    """A vote on a poll THIS bot sent (inbound) — who chose what, on which poll.
+
+    ``poll_message_id`` is the provider id of the message that CREATED the poll (the key a host
+    looks the poll up by). ``poll_id`` is a provider-level poll identifier that WhatsApp does not
+    carry — it is reserved for Telegram, whose ``poll_answer`` names the poll by id, not by the
+    creating message — so it stays ``""`` on a WhatsApp vote.
+
+    ``selected`` is the chosen option NAMES, as a tuple, when the provider delivered a non-empty
+    list of them; otherwise it is ``None``, which means **UNREAD**, never an abstention. A
+    WhatsApp vote comes back with its option names only once the gateway decrypts it against the
+    creating message; an empty ``selectedOptions`` is AMBIGUOUS — a vote withdrawn, or a
+    decryption that failed — and counting it as "voted for nothing" would invent a result, so it
+    is ``None`` (the house rule: a missing measurement is ``None``, never a zero). ``retracted``
+    is a Telegram-only state (an explicit withdrawal, which it reports distinctly) and stays
+    ``False`` on a WhatsApp vote, where a withdrawal is indistinguishable from the unread case."""
+
+    poll_message_id: str = ""
+    poll_id: str = ""
+    selected: Optional[tuple[str, ...]] = None
+    retracted: bool = False
+
+
 @dataclass
 class InboundMessage:
     """A message received from a channel, normalized."""
@@ -280,6 +305,12 @@ class InboundMessage:
     membership: Optional[Membership] = field(default=None, kw_only=True)
     #   set on a ``MessageKind.MEMBERSHIP`` message only: THIS bot joined or left the room
     #   (0.1.6). ``conversation_id`` and ``sender`` are the room; ``author`` is empty.
+    poll_vote: Optional["PollVote"] = field(default=None, kw_only=True)
+    #   set on a ``MessageKind.POLL_VOTE`` message only (0.1.14): a vote on a poll THIS bot sent —
+    #   who chose what, on which poll. ``selected=None`` means the vote was UNREAD (an empty or
+    #   undecryptable WhatsApp vote), never an abstention. Reserved like the fields above: hidden
+    #   from ``repr`` at its default (see ``_GROUP_FIELDS``), so a message without a vote prints
+    #   exactly as before.
 
     def __repr__(self) -> str:
         """The generated dataclass ``repr``, minus the group fields while they hold their default.
@@ -297,14 +328,16 @@ class InboundMessage:
         return f"{type(self).__qualname__}({', '.join(shown)})"
 
 
-# The reserved group fields above, by name — the ones ``InboundMessage.__repr__`` leaves out at
-# their default. One definition, read by the repr and by the tests that pin the inertness.
+# The reserved fields above, by name — the ones ``InboundMessage.__repr__`` leaves out at their
+# default. One definition, read by the repr and by the tests that pin the inertness.
 # ``reply_to_message_id`` joined in 0.1.9 (the quoted id a host reads to decide ``reply_to_bot``)
-# and ``mentioned_ids`` in 0.1.10 (the LIDs a host reads to decide ``mentions_bot``): each is
-# additive and default on every 1:1 message (``()`` for ``mentioned_ids``), so hiding it at its
-# default keeps a 1:1 message's repr byte for byte as before the field existed.
+# and ``mentioned_ids`` in 0.1.10 (the LIDs a host reads to decide ``mentions_bot``); ``poll_vote``
+# in 0.1.14 (a vote on a poll this bot sent, set on a ``POLL_VOTE`` message only — not a group
+# field, but reserved under the same rule). Each is additive and default on every ordinary message
+# (``()`` for ``mentioned_ids``, ``None`` for ``poll_vote``), so hiding it at its default keeps
+# that message's repr byte for byte as before the field existed.
 _GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "mentioned_ids", "reply_to_bot",
-                 "reply_to_message_id", "author_is_bot", "membership")
+                 "reply_to_message_id", "author_is_bot", "membership", "poll_vote")
 
 
 @dataclass

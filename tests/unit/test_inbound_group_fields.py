@@ -43,16 +43,17 @@ from cogno_gateway import (
 )
 
 # ``membership`` joined in 0.1.6 (THIS bot joined or left a room), ``reply_to_message_id`` in
-# 0.1.9 (the quoted id a host reads to decide ``reply_to_bot``) and ``mentioned_ids`` in 0.1.10
-# (the LIDs a WhatsApp message @-mentions, for a host to decide ``mentions_bot``): reserved fields
-# under the same rule — additive, default on every 1:1 message (``()`` for ``mentioned_ids``),
-# hidden from ``repr`` at their default and excluded from the asdict digest below, so the corpus
-# digests still hold unchanged.
+# 0.1.9 (the quoted id a host reads to decide ``reply_to_bot``), ``mentioned_ids`` in 0.1.10
+# (the LIDs a WhatsApp message @-mentions, for a host to decide ``mentions_bot``) and ``poll_vote``
+# in 0.1.14 (a vote on a poll this bot sent, set on a ``POLL_VOTE`` message only): reserved fields
+# under the same rule — additive, default on every ordinary 1:1 message (``()`` for
+# ``mentioned_ids``, ``None`` for ``poll_vote``), hidden from ``repr`` at their default and excluded
+# from the asdict digest below, so the corpus digests still hold unchanged.
 GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "mentioned_ids", "reply_to_bot",
-                "reply_to_message_id", "author_is_bot", "membership")
+                "reply_to_message_id", "author_is_bot", "membership", "poll_vote")
 DEFAULTS = {"conversation_id": "", "author": "", "mentions_bot": False, "mentioned_ids": (),
             "reply_to_bot": False, "reply_to_message_id": "", "author_is_bot": False,
-            "membership": None}
+            "membership": None, "poll_vote": None}
 
 # The fields as they were, in order — the positional shape a caller may rely on.
 OLD_FIELDS = ("channel", "sender", "sender_user_id", "kind", "message_id", "text", "media",
@@ -450,10 +451,11 @@ def test_a_cloud_group_id_that_names_no_group_stays_a_1to1_message_byte_for_byte
     assert isinstance(msg, InboundMessage)
     d = dataclasses.asdict(msg)
     # The keys added after these digests were taken (``membership`` 0.1.6, ``reply_to_message_id``
-    # 0.1.9, ``mentioned_ids`` 0.1.10), each at its default and nothing else.
+    # 0.1.9, ``mentioned_ids`` 0.1.10, ``poll_vote`` 0.1.14), each at its default and nothing else.
     assert d.pop("membership") is None
     assert d.pop("reply_to_message_id") == ""
     assert d.pop("mentioned_ids") == ()
+    assert d.pop("poll_vote") is None
     as_json = json.dumps(d, sort_keys=True, ensure_ascii=False, default=str)
     assert (_digest(repr(msg)), _digest(as_json)) == _CLOUD_CONTROL_BASE[label]
     assert (msg.sender, msg.text) == ("5511900000002", "oi")

@@ -34,6 +34,7 @@ from cogno_gateway.types import (
     MediaRef,
     MessageKind,
     OutboundMessage,
+    PollVote,
     PresenceEvent,
     Reaction,
     SendResult,
@@ -176,19 +177,42 @@ class EvolutionChannel:
 
         def mk(kind: MessageKind, *, text: str = "", media: Optional[MediaRef] = None,
                reaction: Optional[Reaction] = None,
-               selection: Optional[ButtonReply] = None) -> InboundMessage:
+               selection: Optional[ButtonReply] = None,
+               poll_vote: Optional[PollVote] = None) -> InboundMessage:
             return InboundMessage(channel=self.name, sender=sender, kind=kind,
                                   message_id=message_id, text=text, media=media,
                                   reaction=reaction, selection=selection, raw=data,
                                   conversation_id=group_conversation_id, author=group_author,
                                   reply_to_message_id=reply_to_message_id,
-                                  mentioned_ids=group_mentioned_ids)
+                                  mentioned_ids=group_mentioned_ids, poll_vote=poll_vote)
 
         if "reactionMessage" in msg:
             rm = msg["reactionMessage"]
             return mk(MessageKind.REACTION,
                       reaction=Reaction(emoji=rm.get("text", ""),
                                         target_message_id=str(rm.get("key", {}).get("id", ""))))
+        if "pollUpdateMessage" in msg:
+            # A vote on a poll THIS bot sent. Evolution 2.3.7 (Baileys 7.0.0-rc.9) delivers it
+            # DECRYPTED in `messages.upsert`: it fetches the creating message (saved via
+            # `DATABASE_SAVE_DATA_NEW_MESSAGE`), lifts the secret, and writes the option NAMES in
+            # clear. The creating message's id is `pollUpdateMessage.pollCreationMessageKey.id`
+            # (the key a host looks the poll up by); the chosen names are
+            # `pollUpdateMessage.vote.selectedOptions`. A non-empty list of name strings becomes
+            # the `selected` tuple; anything else — an empty list, a missing `vote`, no names —
+            # is `selected=None`, i.e. UNREAD (an empty vote is ambiguous: a withdrawal or a failed
+            # decryption, and never an abstention). The id the poll was CREATED with is what the
+            # host matches; `""` when the creating key is absent.
+            pu = msg["pollUpdateMessage"] or {}
+            creation_key = pu.get("pollCreationMessageKey", {}) or {}
+            poll_message_id = str(creation_key.get("id", "") or "")
+            vote = pu.get("vote") or {}
+            chosen = vote.get("selectedOptions")
+            selected: Optional[tuple[str, ...]] = None
+            if isinstance(chosen, list):
+                names = tuple(str(o) for o in chosen if isinstance(o, str) and o)
+                selected = names or None
+            return mk(MessageKind.POLL_VOTE,
+                      poll_vote=PollVote(poll_message_id=poll_message_id, selected=selected))
         if "buttonsResponseMessage" in msg:
             br = msg["buttonsResponseMessage"]
             return mk(MessageKind.INTERACTIVE, text=br.get("selectedDisplayText", ""),
