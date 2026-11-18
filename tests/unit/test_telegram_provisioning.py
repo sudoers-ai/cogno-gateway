@@ -64,8 +64,9 @@ def test_register_sends_url_secret_and_allowed_updates():
     # the one definition every writer must share — ``setWebhook`` REPLACES the record, so
     # two lists that drift silently change which features work
     # ``my_chat_member`` since 0.1.6: the one event that reports the bot REMOVED from a group.
+    # ``poll_answer`` since 0.1.16: a vote on a non-anonymous poll this bot sent.
     assert payload["allowed_updates"] == ["message", "edited_message", "callback_query",
-                                          "message_reaction", "my_chat_member"]
+                                          "message_reaction", "my_chat_member", "poll_answer"]
 
 
 def test_register_omits_secret_token_when_secret_empty():

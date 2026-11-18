@@ -231,7 +231,15 @@ class PollVote:
     decryption that failed — and counting it as "voted for nothing" would invent a result, so it
     is ``None`` (the house rule: a missing measurement is ``None``, never a zero). ``retracted``
     is a Telegram-only state (an explicit withdrawal, which it reports distinctly) and stays
-    ``False`` on a WhatsApp vote, where a withdrawal is indistinguishable from the unread case."""
+    ``False`` on a WhatsApp vote, where a withdrawal is indistinguishable from the unread case.
+
+    On a TELEGRAM vote (``poll_answer``) the shape differs by provider, not by schema: ``poll_id``
+    carries Telegram's poll identifier, ``poll_message_id`` stays ``""`` (Telegram carries no message
+    id for a vote), and ``selected`` holds the chosen option INDICES rendered to strings, in the
+    order the voter picked them — not names, because Telegram sends indices into the poll's options
+    and the names live with the host that created the poll. A Telegram retraction (an empty
+    selection) is ``retracted=True`` with ``selected=None``. A host reads ``selected`` by channel:
+    names from WhatsApp, indices from Telegram, both mapped to the poll's canonical options."""
 
     poll_message_id: str = ""
     poll_id: str = ""

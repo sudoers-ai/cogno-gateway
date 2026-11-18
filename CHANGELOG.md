@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.16 — 2026-11-18
+
+### Added
+- **Telegram now READS a poll vote.** `TelegramChannel.parse_inbound` turns a `poll_answer` update
+  into an `InboundMessage` with `kind=POLL_VOTE` and a `PollVote` — the same type a WhatsApp vote
+  produces — so a host handles a vote on either channel the same way. The mapping follows what
+  Telegram carries, and only that: `poll_answer.poll_id` → `PollVote.poll_id` (Telegram names a poll
+  by this id, not by a message, so `poll_message_id` stays `""` — no message id is invented);
+  `poll_answer.user.id` → the inbound's `sender` (the voter, as every Telegram inbound carries the
+  user id); and `poll_answer.option_ids` → `PollVote.selected` as the chosen option **indices**
+  rendered to strings, **order preserved**, so a host can tell one vote from a later re-vote. An
+  **empty** `option_ids` is a **retraction** (an explicit withdrawal, a real state Telegram reports
+  distinctly) → `retracted=True` with `selected=None`, never an invented option. A `poll_answer`
+  without a voter `user.id` is malformed and dropped (`None`), like any other unparseable update. No
+  poll id or option index reaches a log line, and no new `event=` is emitted.
+- **The webhook now subscribes to `poll_answer`.** `telegram_provisioning._ALLOWED_UPDATES` gains
+  `"poll_answer"`; Telegram never delivers a vote unless the webhook asks for it. A bot registered
+  before this release keeps its old subscription until its webhook is registered again.
+
 ## 0.1.15 — 2026-11-18
 
 ### Added

@@ -32,6 +32,7 @@ from cogno_gateway.types import (
     Membership,
     MessageKind,
     OutboundMessage,
+    PollVote,
     Reaction,
     SendResult,
     image_mime,
@@ -264,6 +265,9 @@ class TelegramChannel:
         callback = payload.get("callback_query")
         if callback:
             return self._parse_callback(callback)
+        poll_answer = payload.get("poll_answer")
+        if poll_answer:
+            return self._parse_poll_answer(poll_answer)
         message = payload.get("message")
         if not message:
             return None  # edits/etc. — ignored
@@ -301,6 +305,42 @@ class TelegramChannel:
             reaction=Reaction(emoji=new[0].get("emoji", ""),
                               target_message_id=str(reaction.get("message_id", ""))),
             raw=reaction,
+        )
+
+    def _parse_poll_answer(self, answer: dict) -> Optional[InboundMessage]:
+        """A ``poll_answer``: a vote on a poll THIS bot sent, which Telegram delivers only for a
+        NON-ANONYMOUS poll (the kind this channel sends). It names the poll by ``poll_id`` — never
+        by a message id, which Telegram does not carry here — the voter by ``user.id``, and the
+        choice as ``option_ids``, the ZERO-BASED indices into the poll's options, in the order the
+        voter selected them.
+
+        An empty ``option_ids`` is a RETRACTION — an explicit withdrawal, a real state Telegram
+        reports distinctly — so it parses to ``retracted=True`` with ``selected=None`` (no option
+        chosen), never an invented option. A non-empty list becomes ``selected`` as the indices
+        rendered to strings, ORDER PRESERVED: the gateway does not map an index to its option name
+        (the poll's options live with the host, which created it), and a host tells one vote from a
+        later re-vote by that ordered list. ``poll_id`` rides in :attr:`PollVote.poll_id`, the field
+        reserved for exactly this — WhatsApp names a vote by the creating message, Telegram by this
+        id — and ``poll_message_id`` stays ``""`` because Telegram gives none; inventing one would
+        tie the vote to a message that does not exist.
+
+        A ``poll_answer`` without a voter ``user.id`` is dropped (``None``): a non-anonymous vote
+        always names its voter, and one without is malformed. No option index or poll id is a log
+        value here, and no new ``event=`` is emitted — the branch mirrors the others, which log
+        nothing at parse."""
+        user = answer.get("user") or {}
+        user_id = str(user.get("id", "") or "")
+        if not user_id:
+            return None  # a non-anonymous vote always names its voter; without one, drop
+        raw_ids = answer.get("option_ids")
+        indices = [i for i in raw_ids if isinstance(i, int) and not isinstance(i, bool)] \
+            if isinstance(raw_ids, list) else []
+        selected: Optional[tuple[str, ...]] = tuple(str(i) for i in indices) or None
+        return InboundMessage(
+            channel=self.name, sender=user_id, kind=MessageKind.POLL_VOTE,
+            poll_vote=PollVote(poll_id=str(answer.get("poll_id", "") or ""),
+                               selected=selected, retracted=not indices),
+            raw=answer,
         )
 
     def _parse_message(self, message: dict) -> Optional[InboundMessage]:
