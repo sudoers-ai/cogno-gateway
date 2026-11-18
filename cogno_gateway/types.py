@@ -224,27 +224,37 @@ class PollVote:
     carry — it is reserved for Telegram, whose ``poll_answer`` names the poll by id, not by the
     creating message — so it stays ``""`` on a WhatsApp vote.
 
-    ``selected`` is the chosen option NAMES, as a tuple, when the provider delivered a non-empty
-    list of them; otherwise it is ``None``, which means **UNREAD**, never an abstention. A
-    WhatsApp vote comes back with its option names only once the gateway decrypts it against the
-    creating message; an empty ``selectedOptions`` is AMBIGUOUS — a vote withdrawn, or a
-    decryption that failed — and counting it as "voted for nothing" would invent a result, so it
-    is ``None`` (the house rule: a missing measurement is ``None``, never a zero). ``retracted``
-    is a Telegram-only state (an explicit withdrawal, which it reports distinctly) and stays
-    ``False`` on a WhatsApp vote, where a withdrawal is indistinguishable from the unread case.
+    The choice rides in ONE of two fields, by provider — never both, so neither ever carries the
+    other's meaning. ``selected`` is the chosen option NAMES (WhatsApp); ``option_ids`` is the chosen
+    zero-based option INDICES (Telegram). Each is ``None`` when its provider did not deliver a
+    readable choice, which means **UNREAD**, never an abstention.
 
-    On a TELEGRAM vote (``poll_answer``) the shape differs by provider, not by schema: ``poll_id``
-    carries Telegram's poll identifier, ``poll_message_id`` stays ``""`` (Telegram carries no message
-    id for a vote), and ``selected`` holds the chosen option INDICES rendered to strings, in the
-    order the voter picked them — not names, because Telegram sends indices into the poll's options
-    and the names live with the host that created the poll. A Telegram retraction (an empty
-    selection) is ``retracted=True`` with ``selected=None``. A host reads ``selected`` by channel:
-    names from WhatsApp, indices from Telegram, both mapped to the poll's canonical options."""
+    ``selected`` is the WhatsApp option NAMES, as a tuple, when the provider delivered a non-empty
+    list of them; otherwise ``None``. A WhatsApp vote comes back with its names only once the
+    gateway decrypts it against the creating message; an empty ``selectedOptions`` is AMBIGUOUS — a
+    vote withdrawn, or a decryption that failed — and counting it as "voted for nothing" would
+    invent a result, so it is ``None`` (the house rule: a missing measurement is ``None``, never a
+    zero). It stays ``None`` on a Telegram vote (which carries indices, not names).
+
+    ``option_ids`` is the TELEGRAM option indices, as a tuple of ints in the order the voter picked
+    them, when ``poll_answer`` delivered a present, non-empty list in which EVERY entry is an index
+    (an absent list, a non-list, or any non-index entry makes the WHOLE vote unread — ``None`` —
+    never a partial read). It is ``None`` on a WhatsApp vote. Indices, not names, because Telegram
+    sends indices into the poll's options and the names live with the host that created the poll.
+
+    ``retracted`` is a Telegram-only state: an explicit withdrawal, which ``poll_answer`` reports as
+    a present but EMPTY option list — distinct from unread. It stays ``False`` on a WhatsApp vote,
+    where a withdrawal is indistinguishable from the unread case, and on a Telegram vote that was
+    read or unread."""
 
     poll_message_id: str = ""
     poll_id: str = ""
     selected: Optional[tuple[str, ...]] = None
     retracted: bool = False
+    # The Telegram option indices (``poll_answer.option_ids``), in the order the voter picked them;
+    # ``None`` on a WhatsApp vote and on an unread Telegram vote. Additive and ``repr``-excluded, so
+    # a WhatsApp ``PollVote`` (0.1.14) prints byte for byte as before the field existed.
+    option_ids: Optional[tuple[int, ...]] = field(default=None, repr=False, kw_only=True)
 
 
 @dataclass

@@ -9,12 +9,20 @@
   Telegram carries, and only that: `poll_answer.poll_id` → `PollVote.poll_id` (Telegram names a poll
   by this id, not by a message, so `poll_message_id` stays `""` — no message id is invented);
   `poll_answer.user.id` → the inbound's `sender` (the voter, as every Telegram inbound carries the
-  user id); and `poll_answer.option_ids` → `PollVote.selected` as the chosen option **indices**
-  rendered to strings, **order preserved**, so a host can tell one vote from a later re-vote. An
-  **empty** `option_ids` is a **retraction** (an explicit withdrawal, a real state Telegram reports
-  distinctly) → `retracted=True` with `selected=None`, never an invented option. A `poll_answer`
-  without a voter `user.id` is malformed and dropped (`None`), like any other unparseable update. No
-  poll id or option index reaches a log line, and no new `event=` is emitted.
+  user id); and `poll_answer.option_ids` → the new `PollVote.option_ids`, the chosen option
+  **indices** as a tuple of ints, **order preserved**, so a host can tell one vote from a later
+  re-vote. A **present, empty** `option_ids` is a **retraction** (an explicit withdrawal, a real
+  state Telegram reports distinctly) → `retracted=True` with `option_ids=None`. An **absent** or
+  non-list `option_ids`, or **any** non-index entry, makes the **whole** vote unread
+  (`option_ids=None`, `retracted=False`) — never a retraction and never a partial read. A
+  `poll_answer` without a voter `user.id` is malformed and dropped (`None`). No poll id or option
+  index reaches a log line, and no new `event=` is emitted.
+- **`PollVote.option_ids`** (additive, keyword-only, `None` by default and excluded from `repr`)
+  carries the Telegram option indices. It is kept **separate from `PollVote.selected`**, which
+  stays the WhatsApp option **names** and is `None` on a Telegram vote: one field never carries the
+  other's meaning, so an option literally named `"1"` can never be confused with the index `1`. A
+  WhatsApp `PollVote` (0.1.14) is unchanged — `option_ids` defaults to `None` and never appears in
+  its `repr`.
 - **The webhook now subscribes to `poll_answer`.** `telegram_provisioning._ALLOWED_UPDATES` gains
   `"poll_answer"`; Telegram never delivers a vote unless the webhook asks for it. A bot registered
   before this release keeps its old subscription until its webhook is registered again.

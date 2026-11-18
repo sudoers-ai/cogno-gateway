@@ -314,15 +314,24 @@ class TelegramChannel:
         choice as ``option_ids``, the ZERO-BASED indices into the poll's options, in the order the
         voter selected them.
 
-        An empty ``option_ids`` is a RETRACTION — an explicit withdrawal, a real state Telegram
-        reports distinctly — so it parses to ``retracted=True`` with ``selected=None`` (no option
-        chosen), never an invented option. A non-empty list becomes ``selected`` as the indices
-        rendered to strings, ORDER PRESERVED: the gateway does not map an index to its option name
-        (the poll's options live with the host, which created it), and a host tells one vote from a
-        later re-vote by that ordered list. ``poll_id`` rides in :attr:`PollVote.poll_id`, the field
-        reserved for exactly this — WhatsApp names a vote by the creating message, Telegram by this
-        id — and ``poll_message_id`` stays ``""`` because Telegram gives none; inventing one would
-        tie the vote to a message that does not exist.
+        The choice reads into :attr:`PollVote.option_ids` (indices, Telegram's own shape), NOT
+        :attr:`PollVote.selected` (which is WhatsApp option NAMES — the two never share a field, so
+        an option literally named "1" can never be confused with the index 1). Three cases, and only
+        these:
+
+        * a PRESENT, EMPTY ``option_ids`` → a RETRACTION (``retracted=True``, ``option_ids=None``):
+          an explicit withdrawal, a real state Telegram reports distinctly;
+        * a PRESENT, non-empty list in which EVERY entry is an index (an ``int``, and ``bool`` is
+          not one here) → ``option_ids`` is that tuple, ORDER PRESERVED, so a host tells one vote
+          from a later re-vote by the ordered list;
+        * ABSENT, a non-list, or ANY entry that is not an index → the WHOLE vote is UNREAD
+          (``option_ids=None``, ``retracted=False``): never a retraction, and never a partial read
+          (one illegible entry voids the vote, as the host treats an unmatched name).
+
+        ``selected`` stays ``None`` throughout (Telegram carries no names). ``poll_id`` rides in
+        :attr:`PollVote.poll_id`, the field reserved for exactly this — WhatsApp names a vote by the
+        creating message, Telegram by this id — and ``poll_message_id`` stays ``""`` because Telegram
+        gives none; inventing one would tie the vote to a message that does not exist.
 
         A ``poll_answer`` without a voter ``user.id`` is dropped (``None``): a non-anonymous vote
         always names its voter, and one without is malformed. No option index or poll id is a log
@@ -333,13 +342,19 @@ class TelegramChannel:
         if not user_id:
             return None  # a non-anonymous vote always names its voter; without one, drop
         raw_ids = answer.get("option_ids")
-        indices = [i for i in raw_ids if isinstance(i, int) and not isinstance(i, bool)] \
-            if isinstance(raw_ids, list) else []
-        selected: Optional[tuple[str, ...]] = tuple(str(i) for i in indices) or None
+        option_ids: Optional[tuple[int, ...]] = None
+        retracted = False
+        if isinstance(raw_ids, list):
+            if not raw_ids:
+                retracted = True  # a present, EMPTY list is an explicit withdrawal
+            elif all(isinstance(i, int) and not isinstance(i, bool) for i in raw_ids):
+                option_ids = tuple(raw_ids)  # every entry an index → read, order preserved
+            # else: a mixed/illegible list → the WHOLE vote is unread (both stay default)
+        # an absent / non-list option_ids → unread (both stay default), never a retraction
         return InboundMessage(
             channel=self.name, sender=user_id, kind=MessageKind.POLL_VOTE,
             poll_vote=PollVote(poll_id=str(answer.get("poll_id", "") or ""),
-                               selected=selected, retracted=not indices),
+                               option_ids=option_ids, retracted=retracted),
             raw=answer,
         )
 

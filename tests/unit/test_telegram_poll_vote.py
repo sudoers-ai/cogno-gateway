@@ -6,17 +6,22 @@ as ``option_ids``, the zero-based indices into the poll's options in the order t
 them. The shapes below reproduce that; every id and index is synthetic (a vote on a poll with three
 options, chosen by indices 0/1/2).
 
+The choice reads into ``PollVote.option_ids`` (indices — Telegram's shape), NOT ``PollVote.selected``
+(which is WhatsApp option NAMES): the two never share a field, so an option named "1" is never
+confused with the index 1. ``selected`` therefore stays ``None`` on every Telegram vote.
+
 What the twins pin:
 
-* a well-formed vote (one chosen index) parses to ``kind=POLL_VOTE`` with ``poll_id``, the voter as
-  ``sender``, and the ordered index as ``selected`` (strings); ``poll_message_id`` stays ``""`` (no
-  message id is invented) and ``retracted`` is ``False``;
+* a well-formed vote (one index) → ``kind=POLL_VOTE`` with ``poll_id``, the voter as ``sender``,
+  and the ordered index as ``option_ids``; ``poll_message_id`` stays ``""`` (no message id
+  invented), ``selected`` is ``None``, ``retracted`` is ``False``;
 * several indices keep their delivered ORDER (not sorted);
-* an EMPTY ``option_ids`` is a RETRACTION — ``retracted=True`` with ``selected=None`` — never an
-  invented option;
+* a PRESENT, EMPTY ``option_ids`` is a RETRACTION — ``retracted=True`` with ``option_ids=None``;
+* an ABSENT ``option_ids`` is UNREAD, NOT a retraction; a non-index entry voids the WHOLE vote
+  (never a partial read); a bool is not an index;
 * a ``poll_answer`` missing the voter (or malformed) takes the drop path (``None``), no crash;
-* CONTROL: a text, a reaction and a callback still parse exactly as before, carrying no vote — the
-  new branch disturbs nothing beside it, and an ordinary message keeps ``poll_vote=None``.
+* CONTROL: a WhatsApp ``PollVote`` (0.1.14) is byte-for-byte unchanged (``option_ids`` ``None`` and
+  out of its ``repr``); a text, a reaction and a callback still parse as before, carrying no vote.
 """
 
 from __future__ import annotations
@@ -45,9 +50,12 @@ def _answer(option_ids, *, with_user: bool = True, poll_id: str = POLL_ID) -> di
     answer: dict = {"poll_id": poll_id}
     if with_user:
         answer["user"] = {"id": VOTER_ID, "is_bot": False, "first_name": "Belmira"}
-    if option_ids is not None:
+    if option_ids is not _ABSENT:
         answer["option_ids"] = option_ids
     return {"poll_answer": answer}
+
+
+_ABSENT = object()  # sentinel: the `option_ids` key is left out of the update entirely
 
 
 def _parse(option_ids, **over):
@@ -62,39 +70,54 @@ def test_single_choice_vote_carries_poll_id_voter_and_ordered_index():
     assert isinstance(msg.poll_vote, PollVote)
     assert msg.poll_vote.poll_id == POLL_ID
     assert msg.sender == str(VOTER_ID)
-    assert msg.poll_vote.selected == ("0",)
-    assert msg.poll_vote.poll_message_id == ""  # Telegram carries no message id for a vote
+    assert msg.poll_vote.option_ids == (0,)
+    assert msg.poll_vote.selected is None            # Telegram carries indices, never names
+    assert msg.poll_vote.poll_message_id == ""       # Telegram carries no message id for a vote
     assert msg.poll_vote.retracted is False
 
 
 def test_multiple_indices_keep_their_delivered_order():
     msg = _parse([2, 0])
-    assert msg.poll_vote.selected == ("2", "0")  # order preserved, not sorted
+    assert msg.poll_vote.option_ids == (2, 0)        # order preserved, not sorted
+    assert msg.poll_vote.selected is None
     assert msg.poll_vote.retracted is False
 
 
-# ── the retraction (an empty selection, a real state) ───────────────────────────────────
+# ── the retraction (a PRESENT, EMPTY list — a real state) ───────────────────────────────
 
-def test_empty_option_ids_is_a_retraction_not_an_invented_option():
+def test_present_empty_option_ids_is_a_retraction():
     msg = _parse([])
     assert msg.kind == MessageKind.POLL_VOTE
     assert msg.poll_vote.retracted is True
+    assert msg.poll_vote.option_ids is None
     assert msg.poll_vote.selected is None
     assert msg.poll_vote.poll_id == POLL_ID
 
 
-def test_missing_option_ids_reads_as_a_retraction():
-    # A malformed answer with no option_ids at all is an empty selection, never an invented vote.
-    msg = _parse(None)
-    assert msg.poll_vote.retracted is True and msg.poll_vote.selected is None
+# ── the unread vote (never a retraction, never a partial read) ──────────────────────────
+
+def test_absent_option_ids_is_unread_not_a_retraction():
+    msg = _parse(_ABSENT)
+    assert msg.poll_vote.option_ids is None
+    assert msg.poll_vote.retracted is False          # absence is unread, NOT a withdrawal
+    assert msg.poll_vote.selected is None
 
 
-def test_non_integer_indices_are_ignored():
-    # Anything that is not a real index is no choice; what remains decides read vs retracted.
-    msg = _parse([None, "x", True, 1])
-    assert msg.poll_vote.selected == ("1",) and msg.poll_vote.retracted is False
-    empty = _parse([None, "x"])
-    assert empty.poll_vote.selected is None and empty.poll_vote.retracted is True
+def test_non_list_option_ids_is_unread():
+    msg = _parse("0,1")
+    assert msg.poll_vote.option_ids is None and msg.poll_vote.retracted is False
+
+
+def test_any_non_index_entry_voids_the_whole_vote():
+    # One illegible entry → the WHOLE vote is unread, never a partial read.
+    msg = _parse([0, "a", 1])
+    assert msg.poll_vote.option_ids is None and msg.poll_vote.retracted is False
+    assert msg.poll_vote.selected is None
+
+
+def test_a_bool_is_not_an_index():
+    msg = _parse([True])
+    assert msg.poll_vote.option_ids is None and msg.poll_vote.retracted is False
 
 
 # ── the malformed vote → the drop path ──────────────────────────────────────────────────
@@ -107,7 +130,18 @@ def test_voter_without_an_id_is_dropped():
     assert _ch().parse_inbound({"poll_answer": {"poll_id": POLL_ID, "user": {}}}) is None
 
 
-# ── CONTROL: the branch beside it is unchanged, and no ordinary message carries a vote ───
+# ── CONTROL: the WhatsApp PollVote is byte-equal, and no ordinary message carries a vote ─
+
+def test_whatsapp_poll_vote_is_byte_equal_with_option_ids_absent_from_repr():
+    # A 0.1.14 WhatsApp vote never sets option_ids: it defaults to None and stays out of the repr,
+    # so the string a log line or a failing assertion shows is exactly as before the field existed.
+    whatsapp = PollVote(poll_message_id="3EB0QUOSTRAL0001", selected=("Manhã",))
+    assert whatsapp.option_ids is None
+    assert "option_ids" not in repr(whatsapp)
+    assert repr(whatsapp) == (
+        "PollVote(poll_message_id='3EB0QUOSTRAL0001', poll_id='', "
+        "selected=('Manhã',), retracted=False)")
+
 
 def test_text_reaction_and_callback_are_unchanged_and_carry_no_vote():
     ch = _ch()
