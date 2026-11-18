@@ -32,6 +32,7 @@ from cogno_gateway.types import (
     Membership,
     MessageKind,
     OutboundMessage,
+    PollVote,
     Reaction,
     SendResult,
     image_mime,
@@ -264,6 +265,9 @@ class TelegramChannel:
         callback = payload.get("callback_query")
         if callback:
             return self._parse_callback(callback)
+        poll_answer = payload.get("poll_answer")
+        if poll_answer:
+            return self._parse_poll_answer(poll_answer)
         message = payload.get("message")
         if not message:
             return None  # edits/etc. — ignored
@@ -301,6 +305,57 @@ class TelegramChannel:
             reaction=Reaction(emoji=new[0].get("emoji", ""),
                               target_message_id=str(reaction.get("message_id", ""))),
             raw=reaction,
+        )
+
+    def _parse_poll_answer(self, answer: dict) -> Optional[InboundMessage]:
+        """A ``poll_answer``: a vote on a poll THIS bot sent, which Telegram delivers only for a
+        NON-ANONYMOUS poll (the kind this channel sends). It names the poll by ``poll_id`` — never
+        by a message id, which Telegram does not carry here — the voter by ``user.id``, and the
+        choice as ``option_ids``, the ZERO-BASED indices into the poll's options, in the order the
+        voter selected them.
+
+        The choice reads into :attr:`PollVote.option_ids` (indices, Telegram's own shape), NOT
+        :attr:`PollVote.selected` (which is WhatsApp option NAMES — the two never share a field, so
+        an option literally named "1" can never be confused with the index 1). Three cases, and only
+        these:
+
+        * a PRESENT, EMPTY ``option_ids`` → a RETRACTION (``retracted=True``, ``option_ids=None``):
+          an explicit withdrawal, a real state Telegram reports distinctly;
+        * a PRESENT, non-empty list in which EVERY entry is an index (an ``int``, and ``bool`` is
+          not one here) → ``option_ids`` is that tuple, ORDER PRESERVED, so a host tells one vote
+          from a later re-vote by the ordered list;
+        * ABSENT, a non-list, or ANY entry that is not an index → the WHOLE vote is UNREAD
+          (``option_ids=None``, ``retracted=False``): never a retraction, and never a partial read
+          (one illegible entry voids the vote, as the host treats an unmatched name).
+
+        ``selected`` stays ``None`` throughout (Telegram carries no names). ``poll_id`` rides in
+        :attr:`PollVote.poll_id`, the field reserved for exactly this — WhatsApp names a vote by the
+        creating message, Telegram by this id — and ``poll_message_id`` stays ``""`` because Telegram
+        gives none; inventing one would tie the vote to a message that does not exist.
+
+        A ``poll_answer`` without a voter ``user.id`` is dropped (``None``): a non-anonymous vote
+        always names its voter, and one without is malformed. No option index or poll id is a log
+        value here, and no new ``event=`` is emitted — the branch mirrors the others, which log
+        nothing at parse."""
+        user = answer.get("user") or {}
+        user_id = str(user.get("id", "") or "")
+        if not user_id:
+            return None  # a non-anonymous vote always names its voter; without one, drop
+        raw_ids = answer.get("option_ids")
+        option_ids: Optional[tuple[int, ...]] = None
+        retracted = False
+        if isinstance(raw_ids, list):
+            if not raw_ids:
+                retracted = True  # a present, EMPTY list is an explicit withdrawal
+            elif all(isinstance(i, int) and not isinstance(i, bool) for i in raw_ids):
+                option_ids = tuple(raw_ids)  # every entry an index → read, order preserved
+            # else: a mixed/illegible list → the WHOLE vote is unread (both stay default)
+        # an absent / non-list option_ids → unread (both stay default), never a retraction
+        return InboundMessage(
+            channel=self.name, sender=user_id, kind=MessageKind.POLL_VOTE,
+            poll_vote=PollVote(poll_id=str(answer.get("poll_id", "") or ""),
+                               option_ids=option_ids, retracted=retracted),
+            raw=answer,
         )
 
     def _parse_message(self, message: dict) -> Optional[InboundMessage]:

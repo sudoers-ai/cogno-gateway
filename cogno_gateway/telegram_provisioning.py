@@ -58,8 +58,12 @@ logger = logging.getLogger(__name__)
 # ``my_chat_member`` (0.1.6) is the one event that tells a host the bot was REMOVED from a group
 # (a kicked bot receives no service message there). A bot registered before 0.1.6 keeps the old
 # list until its webhook is registered again; joins still reach it as a service message.
+#
+# ``poll_answer`` (0.1.16) carries a vote on a non-anonymous poll this bot sent; Telegram never
+# delivers it unless the webhook subscribes to it, so a bot registered before 0.1.16 reads no votes
+# until its webhook is registered again (the host's live poll results depend on the re-registration).
 _ALLOWED_UPDATES = ["message", "edited_message", "callback_query", "message_reaction",
-                    "my_chat_member"]
+                    "my_chat_member", "poll_answer"]
 
 
 def reads_all_of(data: Any) -> "Optional[bool]":
