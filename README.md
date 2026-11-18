@@ -30,6 +30,8 @@ await tg.send(msg.sender, OutboundMessage(text="resposta"))   # auto-chunked
 
 `InboundMessage.kind` is a `MessageKind`: `TEXT · IMAGE · AUDIO · VIDEO · DOCUMENT · LOCATION · REACTION · STICKER · INTERACTIVE`. So a host handles **reactions** (emoji + target message id), **media** (a `MediaRef` resolved lazily via `fetch_media` — e.g. to feed audio to cogno-vox), **quick-reply buttons** (send `OutboundMessage(buttons=[Button(...)])`; the tap returns `kind=INTERACTIVE` with `selection.id`), replies, and plain text uniformly across channels.
 
+To **send a poll**, attach a `Poll` to `OutboundMessage(poll=Poll(question, options, multiple=False))` — a question with 2–12 named options (validated at construction; the vote returns by option name). Only WhatsApp via `EvolutionChannel` sends it today (`message/sendPoll`); `TelegramChannel`, `WhatsAppCloudChannel` and `WebChannel` return `SendResult(ok=False, error="poll_unsupported")` with no outbound call.
+
 To **send** media back, attach a `MediaRef` to `OutboundMessage(media=[...])`. A JPEG or PNG (the `cogno_gateway.IMAGE_MIMES` set) is delivered as a **visible image** on every channel — Telegram `sendPhoto`, WhatsApp `sendMedia` with `mediatype: image`, Cloud API `type: image` — so it shows inline in the chat rather than as a file to download. Any other MIME, WebP included, or a `MediaRef` with no MIME, still goes as a document.
 
 ## 1:1 by default — groups only on Telegram, only when the host opts in

@@ -182,6 +182,38 @@ class Template:
     params: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class Poll:
+    """A poll to offer (outbound) — a ``question`` with 2–12 named ``options``.
+
+    ``multiple`` lets the voter pick more than one. The vote comes back BY NAME (the provider
+    echoes the chosen option text, not an index), so the options must be distinct ignoring case;
+    a case-only variation would make two votes indistinguishable.
+
+    Frozen, and validated at construction. Every :class:`ValueError` it raises carries a FIXED
+    message that NEVER echoes the question or an option: the text is third-party content and has
+    no place in an exception string (which a host may log). Only WhatsApp via ``EvolutionChannel``
+    sends it today; the other adapters refuse with ``error="poll_unsupported"`` and no HTTP."""
+
+    question: str
+    options: tuple[str, ...]
+    multiple: bool = False
+
+    def __post_init__(self) -> None:
+        if not (self.question or "").strip():
+            raise ValueError("Poll.question must not be empty")
+        if not (2 <= len(self.options) <= 12):
+            raise ValueError("Poll.options must hold between 2 and 12 entries")
+        seen: set[str] = set()
+        for opt in self.options:
+            if not (opt or "").strip():
+                raise ValueError("Poll.options entries must each be non-empty")
+            key = opt.strip().casefold()
+            if key in seen:
+                raise ValueError("Poll.options must be unique, ignoring case")
+            seen.add(key)
+
+
 @dataclass
 class InboundMessage:
     """A message received from a channel, normalized."""
@@ -288,6 +320,7 @@ class OutboundMessage:
     reaction: Optional[Reaction] = None
     buttons: list["Button"] = field(default_factory=list)   # quick-replies (≤3) under the text
     list_menu: Optional["ListMenu"] = None  # a menu of >3 options (WhatsApp list / TG keyboard)
+    poll: Optional["Poll"] = None           # a WhatsApp poll (EvolutionChannel; others refuse)
     template: Optional["Template"] = None   # proactive send outside the 24h window
     # The provider id of the inbound message this reply answers. Telegram threads the FIRST text
     # chunk to it (``reply_parameters``), so a room sees whom the bot is answering; a value that

@@ -224,6 +224,9 @@ class WhatsAppCloudChannel:
 
     # ── send ──────────────────────────────────────────────────────────
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
+        if message.poll is not None:
+            # The official WhatsApp Cloud API has no poll message type; refuse, no HTTP.
+            return SendResult(ok=False, error="poll_unsupported")
         ids: list[str] = []
         url = f"{self._base}/{self._phone_id}/messages"
         max_chars = self._cfg.max_chars or 600

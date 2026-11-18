@@ -11,6 +11,7 @@ from cogno_gateway import (
     MediaRef,
     MessageKind,
     OutboundMessage,
+    Poll,
     Reaction,
     Template,
     WhatsAppCloudChannel,
@@ -162,6 +163,13 @@ async def test_send_error(fake_httpx):
     fake_httpx.routes = {"/messages": FakeResponse(status=500)}
     res = await _ch().send("5511", OutboundMessage(text="hi"))
     assert res.ok is False and "500" in res.error
+
+
+async def test_send_poll_unsupported_no_http(fake_httpx):
+    res = await _ch().send("5511", OutboundMessage(
+        poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+    assert res.ok is False and res.error == "poll_unsupported"
+    assert fake_httpx.calls == []
 
 
 async def test_fetch_media(fake_httpx):
