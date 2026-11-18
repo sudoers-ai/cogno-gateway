@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.15 — 2026-11-18
+
+### Added
+- **Telegram now SENDS a poll, natively and NON-ANONYMOUS.** `TelegramChannel.send`, given an
+  `OutboundMessage.poll`, calls `POST /bot<token>/sendPoll` with
+  `{chat_id, question, options, is_anonymous: false, allows_multiple_answers: <Poll.multiple>}`
+  instead of refusing with `poll_unsupported`. The poll is **non-anonymous** on purpose: Telegram's
+  `poll_answer` update carries the voter only for a non-anonymous poll, and this channel exists to
+  route a vote back to a turn.
+- **`SendResult.poll_id`** (additive, defaults to `""`) carries the created poll's id, read from
+  the `sendPoll` reply's `result.poll.id`. Telegram's `poll_answer` names a poll by this id, not by
+  the creating message, so a host stores it to tie a later vote to the poll it answers. It stays
+  `""` on every other send, WhatsApp polls included (WhatsApp carries no such id — a vote there is
+  keyed by the creating message id).
+- **The options go as a JSON array of strings, capped at ten.** This channel targets **Bot API
+  7.0** (the version that added `setMessageReaction` and `reply_parameters`, both already in use;
+  nothing here uses a newer feature), whose `sendPoll` documents `options` as "a list of 2-10
+  answer options" of strings — the `InputPollOption` object form only arrived in Bot API 7.3. A
+  poll with **more than ten** options (the `Poll` type itself allows up to twelve) is refused with
+  `SendResult(ok=False, error="poll_unsupported")` and **no** HTTP call — never truncated, which
+  would silently drop a choice from the ballot. `WhatsAppCloudChannel` and `WebChannel` still
+  refuse a poll outright, unchanged. No question or option text reaches any log line, and no new
+  `event=` is emitted; a failed `sendPoll` is named by class and status with the token masked, like
+  any other Telegram send.
+
 ## 0.1.14 — 2026-11-18
 
 ### Added

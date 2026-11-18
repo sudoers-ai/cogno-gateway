@@ -21,7 +21,7 @@ from urllib.parse import quote
 import httpx
 import pytest
 
-from cogno_gateway import ChannelConfig, MediaRef, OutboundMessage, Reaction, TelegramChannel
+from cogno_gateway import ChannelConfig, MediaRef, OutboundMessage, Poll, Reaction, TelegramChannel
 
 _REAL_ASYNC_CLIENT = httpx.AsyncClient
 
@@ -172,6 +172,7 @@ async def test_a_transport_failure_logs_the_class_on_both_lines(telegram_answers
     (OutboundMessage(media=[MediaRef(url="http://x.invalid/a.pdf")]), "sendDocument"),
     (OutboundMessage(media=[MediaRef(url="http://x.invalid/a.png", mime="image/png")]),
      "sendPhoto"),
+    (OutboundMessage(poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))), "sendPoll"),
 ])
 async def test_every_bot_api_call_fails_without_the_token(telegram_answers, caplog, message,
                                                           endpoint):

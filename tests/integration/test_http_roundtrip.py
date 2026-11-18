@@ -159,6 +159,47 @@ async def test_telegram_group_reply_is_threaded_to_the_room_over_real_httpx(mock
         "reply_parameters": {"message_id": 57, "allow_sending_without_reply": True}}
 
 
+async def test_telegram_sendpoll_serializes_non_anonymous_over_real_httpx(mock_http):
+    """A poll goes out as a real ``sendPoll`` request: non-anonymous, the options as a JSON array
+    of strings, and the created poll's id read back into ``SendResult.poll_id``. The whole thing
+    runs through the real httpx serialization layers against a MockTransport — no network, no real
+    token. Every id and poll form is invented."""
+    from cogno_gateway import OutboundMessage, Poll, TelegramChannel
+
+    rec = mock_http(lambda req: httpx.Response(200, json={
+        "ok": True, "result": {"message_id": 314, "poll": {"id": "QPOLL-INVENTADO-RT"}}}))
+    ch = TelegramChannel(ChannelConfig(token="7000001:SEGREDO-INVENTADO", secret="s"))
+
+    res = await ch.send("4242", OutboundMessage(
+        poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"), multiple=True)))
+
+    assert res.ok is True and res.poll_id == "QPOLL-INVENTADO-RT"
+    assert res.message_ids == ["314"]
+    assert len(rec.requests) == 1
+    req = rec.requests[0]
+    assert req.url.path.endswith("/sendPoll")
+    assert json.loads(req.content) == {
+        "chat_id": "4242", "question": "Qual turno prefere?",
+        "options": ["Manhã", "Tarde"],
+        "is_anonymous": False, "allows_multiple_answers": True}
+
+
+async def test_telegram_sendpoll_above_the_cap_is_unsupported_with_no_request(mock_http):
+    """Eleven options (the ``Poll`` type allows twelve, Telegram caps at ten): the channel refuses
+    with ``poll_unsupported`` and never touches the transport — the ballot is not cut to fit."""
+    from cogno_gateway import OutboundMessage, Poll, TelegramChannel
+
+    rec = mock_http(lambda req: httpx.Response(200, json={"ok": True, "result": {}}))
+    ch = TelegramChannel(ChannelConfig(token="7000001:SEGREDO-INVENTADO", secret="s"))
+    eleven = ("Astra", "Belmo", "Caldi", "Dorne", "Everic", "Fyntar",
+              "Gleov", "Holmic", "Ivren", "Jocalt", "Kryver")
+
+    res = await ch.send("4242", OutboundMessage(poll=Poll("Escolha uma", eleven)))
+
+    assert res.ok is False and res.error == "poll_unsupported"
+    assert rec.requests == []
+
+
 async def test_the_registrar_subscribes_to_the_bots_membership_and_the_update_parses(mock_http):
     """0.1.6: ``setWebhook`` over the real httpx layers asks for ``my_chat_member``, and the update
     Telegram then posts (decoded from its JSON bytes, as a webhook receives it) parses to ONE

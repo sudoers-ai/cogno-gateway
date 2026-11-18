@@ -418,3 +418,10 @@ class SendResult:
     ok: bool
     message_ids: list[str] = field(default_factory=list)
     error: str = ""
+    # The provider id of a poll this send CREATED (Telegram ``sendPoll`` → ``result.poll.id``), by
+    # which the provider later names votes on it: Telegram's ``poll_answer`` identifies a poll by
+    # this id, not by the creating message. A host stores it to tie an inbound vote back to the
+    # poll it answers. "" on every other send — a plain reply, and a WhatsApp poll too, since
+    # WhatsApp carries no such id (a vote there is keyed by the creating message id). Additive:
+    # a caller that never reads it sees exactly the previous result.
+    poll_id: str = ""
