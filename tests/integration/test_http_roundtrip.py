@@ -184,9 +184,54 @@ async def test_telegram_sendpoll_serializes_non_anonymous_over_real_httpx(mock_h
         "is_anonymous": False, "allows_multiple_answers": True}
 
 
+async def test_telegram_poll_sends_text_first_then_poll_over_real_httpx(mock_http):
+    """Text + poll: the introduction goes out as a real ``sendMessage``, THEN the poll as
+    ``sendPoll`` — two requests in order, ids in order — as on WhatsApp. The text request carries
+    exactly the plain-reply body (no buttons, no media). Every id and form is invented."""
+    from cogno_gateway import OutboundMessage, Poll, TelegramChannel
+
+    def responder(req):
+        if req.url.path.endswith("/sendMessage"):
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 500}})
+        return httpx.Response(200, json={
+            "ok": True, "result": {"message_id": 501, "poll": {"id": "QPOLL-INVENTADO-RT2"}}})
+
+    rec = mock_http(responder)
+    ch = TelegramChannel(ChannelConfig(token="7000001:SEGREDO-INVENTADO", secret="s"))
+    res = await ch.send("4242", OutboundMessage(
+        text="Escolha o turno:", poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+
+    assert [r.url.path.rsplit("/", 1)[1] for r in rec.requests] == ["sendMessage", "sendPoll"]
+    assert res.ok is True and res.message_ids == ["500", "501"]
+    assert res.poll_id == "QPOLL-INVENTADO-RT2"
+    assert json.loads(rec.requests[0].content) == {"chat_id": "4242", "text": "Escolha o turno:"}
+
+
+async def test_telegram_poll_text_failure_does_not_send_the_poll(mock_http):
+    """If the introductory text fails, the poll is NOT sent and the error returns — with no token
+    (the bot id sits in the URL path, never in the surfaced error)."""
+    from cogno_gateway import OutboundMessage, Poll, TelegramChannel
+
+    def responder(req):
+        if req.url.path.endswith("/sendMessage"):
+            return httpx.Response(500)
+        return httpx.Response(200, json={
+            "ok": True, "result": {"message_id": 1, "poll": {"id": "X"}}})
+
+    rec = mock_http(responder)
+    ch = TelegramChannel(ChannelConfig(token="7000001:SEGREDO-INVENTADO", secret="s"))
+    res = await ch.send("4242", OutboundMessage(
+        text="Escolha o turno:", poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+
+    assert res.ok is False
+    assert [r for r in rec.requests if r.url.path.endswith("/sendPoll")] == []
+    assert "7000001" not in res.error and "SEGREDO-INVENTADO" not in res.error
+
+
 async def test_telegram_sendpoll_above_the_cap_is_unsupported_with_no_request(mock_http):
-    """Eleven options (the ``Poll`` type allows twelve, Telegram caps at ten): the channel refuses
-    with ``poll_unsupported`` and never touches the transport — the ballot is not cut to fit."""
+    """Eleven options (the ``Poll`` type allows twelve, Telegram caps at ten) WITH text: the channel
+    refuses with ``poll_unsupported`` and never touches the transport — the ballot is not cut to
+    fit, and not even the introductory text goes out."""
     from cogno_gateway import OutboundMessage, Poll, TelegramChannel
 
     rec = mock_http(lambda req: httpx.Response(200, json={"ok": True, "result": {}}))
@@ -194,7 +239,8 @@ async def test_telegram_sendpoll_above_the_cap_is_unsupported_with_no_request(mo
     eleven = ("Astra", "Belmo", "Caldi", "Dorne", "Everic", "Fyntar",
               "Gleov", "Holmic", "Ivren", "Jocalt", "Kryver")
 
-    res = await ch.send("4242", OutboundMessage(poll=Poll("Escolha uma", eleven)))
+    res = await ch.send("4242", OutboundMessage(text="Escolha o turno:",
+                                                poll=Poll("Escolha uma", eleven)))
 
     assert res.ok is False and res.error == "poll_unsupported"
     assert rec.requests == []

@@ -212,6 +212,45 @@ async def test_send_poll_above_the_option_cap_is_unsupported_no_http_no_cut(fake
     assert fake_httpx.calls == []
 
 
+async def test_send_poll_sends_text_first_then_poll_in_order(fake_httpx):
+    # A host builds ONE message (introduction + poll) for every channel; on Telegram the text goes
+    # out FIRST, then the poll — as on WhatsApp — and no buttons/media body is emitted.
+    fake_httpx.routes = {
+        "sendMessage": FakeResponse({"result": {"message_id": 10}}),
+        "sendPoll": FakeResponse(
+            {"result": {"message_id": 11, "poll": {"id": "QPOLL-INVENTADO-3"}}}),
+    }
+    res = await _ch().send("42", OutboundMessage(
+        text="Escolha o turno:", poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+    endpoints = [c["url"].rsplit("/", 1)[1] for c in fake_httpx.calls]
+    assert endpoints == ["sendMessage", "sendPoll"]
+    # the text body is exactly the plain-reply body (no reply_markup, no media)
+    assert body_of([c for c in fake_httpx.calls if "sendMessage" in c["url"]][0]) == {
+        "chat_id": "42", "text": "Escolha o turno:"}
+    # ids are the text's THEN the poll's, in order; poll_id is the poll's
+    assert res.ok is True and res.message_ids == ["10", "11"]
+    assert res.poll_id == "QPOLL-INVENTADO-3"
+
+
+async def test_send_poll_when_the_text_fails_the_poll_is_not_sent(fake_httpx):
+    # the text send fails → the poll never goes out and the whole send fails, with no token leaked
+    fake_httpx.routes = {"sendMessage": FakeResponse(status=500)}
+    res = await _ch().send("42", OutboundMessage(
+        text="Escolha o turno:", poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+    assert res.ok is False
+    assert [c for c in fake_httpx.calls if "sendPoll" in c["url"]] == []
+    assert "BOT123" not in res.error
+
+
+async def test_send_poll_above_the_cap_with_text_refuses_before_any_send(fake_httpx):
+    # eleven options WITH text: the refusal is BEFORE any send — not even the text goes out, so a
+    # refused poll leaves no orphaned introduction behind.
+    res = await _ch().send("42", OutboundMessage(
+        text="Escolha o turno:", poll=Poll("Escolha uma", _ELEVEN_OPTIONS)))
+    assert res.ok is False and res.error == "poll_unsupported"
+    assert fake_httpx.calls == []
+
+
 async def test_send_voice_note(fake_httpx):
     fake_httpx.routes = {"sendVoice": FakeResponse({"result": {"message_id": 9}})}
     res = await _ch().send("42", OutboundMessage(audio=b"OPUS", audio_format="ogg"))

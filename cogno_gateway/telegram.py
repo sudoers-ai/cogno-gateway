@@ -32,7 +32,6 @@ from cogno_gateway.types import (
     Membership,
     MessageKind,
     OutboundMessage,
-    Poll,
     Reaction,
     SendResult,
     image_mime,
@@ -508,11 +507,13 @@ class TelegramChannel:
         ``message_ids`` stays best-effort: when a call times out and its retry succeeds, the id
         recorded is the retry's. If the first attempt did land after all, that copy's id was
         never returned to us and cannot be listed. A missing id is not evidence a message was
-        not delivered — nothing in this class can produce that evidence."""
+        not delivered — nothing in this class can produce that evidence.
+
+        A reply carrying a :class:`Poll` is sent by :meth:`_send_poll`: any text goes FIRST,
+        through the same path as a plain reply, then the poll — as on WhatsApp — so an
+        introduction is never silently dropped. Buttons and media do not ride with a poll."""
         if message.poll is not None:
-            # A poll is its own message type and exclusive of the text/buttons/media bodies below;
-            # it sends through sendPoll and returns here.
-            return await self._send_poll(recipient, message.poll)
+            return await self._send_poll(recipient, message)
         ids: list[str] = []
         max_chars = self._cfg.max_chars or 600
         # Bold into this channel's dialect BEFORE chunking, so the pair is still intact when it
@@ -587,33 +588,52 @@ class TelegramChannel:
         logger.debug("channel=telegram event=message_sent chunks=%d ok=true", len(ids))
         return SendResult(ok=True, message_ids=ids)
 
-    async def _send_poll(self, recipient: str, poll: Poll) -> SendResult:
-        """Send a native Telegram poll (0.1.15), and name it back to the host.
+    async def _send_poll(self, recipient: str, message: OutboundMessage) -> SendResult:
+        """Send a native Telegram poll (0.1.15): any text FIRST, then the poll, and name it back.
+
+        **Text first, then the poll, as on WhatsApp.** The host builds ONE ``OutboundMessage``
+        (an introduction plus the poll) for every channel, so the Telegram path must send the text
+        before the poll exactly as ``EvolutionChannel`` does — an early return that dropped the text
+        would lose the introduction on Telegram alone, silently. The text goes through the SAME path
+        a plain reply takes (the bold dialect, then the chunker); buttons and media do NOT ride with
+        a poll. If the text send FAILS, the poll is NOT sent and the error returns, as the whole
+        send fails when a text chunk fails. ``message_ids`` carries the text ids then the poll's, in
+        order; without text it is just the poll's.
 
         **Non-anonymous on purpose.** Telegram's ``poll_answer`` update identifies a poll by a
         poll id and carries the voter only when the poll is NOT anonymous; an anonymous poll
         reports no voter at all. So ``is_anonymous`` is always ``False`` here — this channel exists
         to route a vote back to a turn, which an anonymous poll could not. The created poll's id is
         returned in :attr:`SendResult.poll_id` (``result.poll.id``), the key a host stores to tie a
-        later vote to this poll; the poll message's own id is returned in ``message_ids`` as any
-        send's is.
+        later vote to this poll.
 
         ``allows_multiple_answers`` mirrors ``Poll.multiple``. The options go as a JSON array of
         strings (the Bot API 7.0 shape this channel targets — see :data:`_MAX_POLL_OPTIONS`).
 
         A poll with MORE than :data:`_MAX_POLL_OPTIONS` options is REFUSED with ``poll_unsupported``
-        and no HTTP call — never truncated, which would silently drop a choice from the ballot. The
-        ``Poll`` type already rejects fewer than two options and a case-only duplicate at
-        construction, so the only bound left to the channel is its provider's upper cap.
+        BEFORE any send — not even the introductory text goes out, so a refused poll leaves no
+        orphaned half-message behind — and never truncated, which would silently drop a choice from
+        the ballot. The ``Poll`` type already rejects fewer than two options and a case-only
+        duplicate at construction, so the only bound left to the channel is its provider's upper cap.
 
         The question and the options are third-party text (the poll body), so no log line carries
         them; a failure is named by class and status exactly as :meth:`send`'s is, through the same
-        token-masking :func:`_error_detail`. The one provider call goes through :meth:`_post`, which
+        token-masking :func:`_error_detail`. Each provider call goes through :meth:`_post`, which
         retries once on a transport failure."""
+        poll = message.poll
+        assert poll is not None  # only reached from send() under `message.poll is not None`
         if len(poll.options) > _MAX_POLL_OPTIONS:
             return SendResult(ok=False, error="poll_unsupported")
+        ids: list[str] = []
+        max_chars = self._cfg.max_chars or 600
+        text = to_channel_markup(message.text, self.name)
+        log_outbound_markup(logger, "telegram", message.text, text)
         async with build_async_client(self._cfg) as client:
             try:
+                for chunk in split_message(text, max_chars=max_chars):
+                    resp = await self._post(client, f"{_API}/bot{self._token}/sendMessage",
+                                            json={"chat_id": recipient, "text": chunk})
+                    ids.append(str(resp.json().get("result", {}).get("message_id", "")))
                 resp = await self._post(client, f"{_API}/bot{self._token}/sendPoll", json={
                     "chat_id": recipient,
                     "question": poll.question,
@@ -622,11 +642,11 @@ class TelegramChannel:
                     "allows_multiple_answers": poll.multiple,
                 })
             except httpx.HTTPError as exc:
-                logger.warning("channel=telegram event=send_failed sent=0 error=%s status=%s",
-                               type(exc).__name__, _log_status(exc))
-                return SendResult(ok=False, error=_error_detail(exc, self._token))
+                logger.warning("channel=telegram event=send_failed sent=%d error=%s status=%s",
+                               len(ids), type(exc).__name__, _log_status(exc))
+                return SendResult(ok=False, message_ids=ids, error=_error_detail(exc, self._token))
         result = resp.json().get("result", {}) or {}
-        message_id = str(result.get("message_id", ""))
+        ids.append(str(result.get("message_id", "")))
         poll_id = str((result.get("poll") or {}).get("id", ""))
-        logger.debug("channel=telegram event=message_sent chunks=1 ok=true")
-        return SendResult(ok=True, message_ids=[message_id] if message_id else [], poll_id=poll_id)
+        logger.debug("channel=telegram event=message_sent chunks=%d ok=true", len(ids))
+        return SendResult(ok=True, message_ids=ids, poll_id=poll_id)

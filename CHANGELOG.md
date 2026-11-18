@@ -8,7 +8,11 @@
   `{chat_id, question, options, is_anonymous: false, allows_multiple_answers: <Poll.multiple>}`
   instead of refusing with `poll_unsupported`. The poll is **non-anonymous** on purpose: Telegram's
   `poll_answer` update carries the voter only for a non-anonymous poll, and this channel exists to
-  route a vote back to a turn.
+  route a vote back to a turn. Any `text` on the message goes out **first, then the poll, as on
+  WhatsApp** (the same plain-reply path — buttons and media do not ride with a poll), so a host that
+  builds one `OutboundMessage` (an introduction plus the poll) for every channel never loses the
+  introduction on Telegram; if the text send fails, the poll is not sent and the error returns.
+  `SendResult.message_ids` carries the text ids then the poll's, in order.
 - **`SendResult.poll_id`** (additive, defaults to `""`) carries the created poll's id, read from
   the `sendPoll` reply's `result.poll.id`. Telegram's `poll_answer` names a poll by this id, not by
   the creating message, so a host stores it to tie a later vote to the poll it answers. It stays
