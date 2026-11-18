@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.13 — 2026-11-17
+
+### Added
+- **A new outbound `Poll` type, and WhatsApp (`EvolutionChannel`) now SENDS it; the other
+  adapters refuse.** `Poll(question, options, multiple=False)` is a frozen dataclass validated at
+  construction: the question must be non-empty, there must be 2–12 options, and each option must
+  be non-empty and unique ignoring case (the vote comes back BY NAME, so a case-only variation
+  would make two votes indistinguishable). Every validation `ValueError` carries a FIXED message
+  that NEVER echoes the question or an option. `OutboundMessage.poll` carries it, and `Poll` is
+  exported from the package. `EvolutionChannel.send` sends any `text` first, exactly as a plain
+  reply does, then `POST /message/sendPoll/{instance}` with
+  `{"number", "name": question, "selectableCount": len(options) if multiple else 1, "values":
+  options}`; the poll is EXCLUSIVE of the list/buttons bodies. `TelegramChannel`,
+  `WhatsAppCloudChannel` and `WebChannel` return `SendResult(ok=False, error="poll_unsupported")`
+  and make no HTTP call (the official Cloud API has no poll type; the web widget has no poll
+  surface). No question or option text ever reaches a log line.
+
 ## 0.1.12 — 2026-11-17
 
 ### Added

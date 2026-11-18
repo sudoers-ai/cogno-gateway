@@ -11,6 +11,7 @@ from cogno_gateway import (
     MediaRef,
     MessageKind,
     OutboundMessage,
+    Poll,
 )
 from tests.conftest import FakeResponse, body_of
 
@@ -107,6 +108,57 @@ async def test_send_list(fake_httpx):
     b = body_of([c for c in fake_httpx.calls if "sendList" in c["url"]][0])
     assert b["buttonText"] == "Menu"
     assert b["sections"][0]["rows"][0] == {"rowId": "corte", "title": "Corte", "description": ""}
+
+
+async def test_send_poll(fake_httpx):
+    fake_httpx.routes = {"sendPoll": FakeResponse({"key": {"id": "P1"}})}
+    res = await _ch().send("5511@s.whatsapp.net",
+                           OutboundMessage(poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+    assert res.ok is True and res.message_ids == ["P1"]
+    calls = [c for c in fake_httpx.calls if "sendPoll" in c["url"]]
+    assert len(calls) == 1
+    assert body_of(calls[0]) == {"number": "5511", "name": "Qual turno prefere?",
+                                 "selectableCount": 1, "values": ["Manhã", "Tarde"]}
+
+
+async def test_send_poll_multiple_sets_selectable_count(fake_httpx):
+    fake_httpx.routes = {"sendPoll": FakeResponse({"key": {"id": "P2"}})}
+    await _ch().send("5511@s.whatsapp.net",
+                     OutboundMessage(poll=Poll("Qual turno prefere?",
+                                               ("Manhã", "Tarde", "Noite"), multiple=True)))
+    b = body_of([c for c in fake_httpx.calls if "sendPoll" in c["url"]][0])
+    assert b["selectableCount"] == 3 and b["values"] == ["Manhã", "Tarde", "Noite"]
+
+
+async def test_send_text_then_poll_order(fake_httpx):
+    fake_httpx.routes = {"sendText": FakeResponse({"key": {"id": "T1"}}),
+                         "sendPoll": FakeResponse({"key": {"id": "P3"}})}
+    await _ch().send("5511@s.whatsapp.net",
+                     OutboundMessage(text="Escolha:", poll=Poll("Qual turno prefere?",
+                                                                ("Manhã", "Tarde"))))
+    endpoints = [c["url"].rsplit("/", 2)[1] for c in fake_httpx.calls]
+    # the text goes out FIRST, then the poll — and no list/buttons body is emitted.
+    assert endpoints == ["sendText", "sendPoll"]
+
+
+@pytest.mark.parametrize("options, multiple", [
+    (("Manhã",), False),                                  # too few (1)
+    (tuple(f"o{i}" for i in range(13)), False),           # too many (13)
+    (("Manhã", "manhã"), False),                          # duplicate, case-insensitive
+    (("Manhã", "   "), False),                            # blank option
+])
+async def test_send_poll_validation_raises_before_http(fake_httpx, options, multiple):
+    with pytest.raises(ValueError) as exc:
+        OutboundMessage(poll=Poll("Qual turno prefere?", options, multiple=multiple))
+    # the message is FIXED and echoes neither the question nor an option.
+    assert "Qual turno" not in str(exc.value) and "Manhã" not in str(exc.value)
+    assert fake_httpx.calls == []
+
+
+def test_poll_rejects_empty_question():
+    with pytest.raises(ValueError) as exc:
+        Poll("   ", ("Manhã", "Tarde"))
+    assert "Manhã" not in str(exc.value)
 
 
 def test_ignores_from_me_groups_and_non_upsert():

@@ -498,6 +498,10 @@ class TelegramChannel:
         recorded is the retry's. If the first attempt did land after all, that copy's id was
         never returned to us and cannot be listed. A missing id is not evidence a message was
         not delivered — nothing in this class can produce that evidence."""
+        if message.poll is not None:
+            # A native Telegram poll is a later change; until then this channel refuses a poll
+            # outright rather than silently dropping it, and makes no HTTP call.
+            return SendResult(ok=False, error="poll_unsupported")
         ids: list[str] = []
         max_chars = self._cfg.max_chars or 600
         # Bold into this channel's dialect BEFORE chunking, so the pair is still intact when it

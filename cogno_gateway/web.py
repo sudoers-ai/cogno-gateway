@@ -108,6 +108,9 @@ class WebChannel:
         )
 
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
+        if message.poll is not None:
+            # The web widget has no poll surface; refuse rather than drop it (and emit nothing).
+            return SendResult(ok=False, error="poll_unsupported")
         # No outbound call — the host returns this dict in the HTTP response.
         _ = self.serialize(recipient, message)
         return SendResult(ok=True)

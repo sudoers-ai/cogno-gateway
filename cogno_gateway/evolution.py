@@ -358,7 +358,25 @@ class EvolutionChannel:
                         json={"key": {"remoteJid": recipient, "fromMe": False,
                                       "id": message.reaction.target_message_id},
                               "reaction": message.reaction.emoji})
-                if message.list_menu is not None:
+                if message.poll is not None:
+                    # A poll is EXCLUSIVE of the list/buttons bodies below. The text (if any)
+                    # goes FIRST, exactly as a plain reply does, then the poll itself. The
+                    # question and the options are third-party text — they are the poll BODY,
+                    # never a log value.
+                    for chunk in split_message(text, max_chars=max_chars):
+                        resp = await self._post(client,
+                            f"{self._base}/message/sendText/{self._instance}",
+                            headers=self._headers(), json={"number": number, "text": chunk})
+                        ids.append(str(resp.json().get("key", {}).get("id", "")))
+                    options = list(message.poll.options)
+                    resp = await self._post(client,
+                        f"{self._base}/message/sendPoll/{self._instance}",
+                        headers=self._headers(),
+                        json={"number": number, "name": message.poll.question,
+                              "selectableCount": len(options) if message.poll.multiple else 1,
+                              "values": options})
+                    ids.append(str(resp.json().get("key", {}).get("id", "")))
+                elif message.list_menu is not None:
                     resp = await self._post(client,
                         f"{self._base}/message/sendList/{self._instance}",
                         headers=self._headers(),

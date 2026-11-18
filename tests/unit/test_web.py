@@ -1,6 +1,6 @@
 """Unit tests for the WebChannel (cogno-cloud-ui JSON contract)."""
 
-from cogno_gateway import MessageKind, OutboundMessage, WebChannel
+from cogno_gateway import MessageKind, OutboundMessage, Poll, WebChannel
 
 
 def test_parse_plain_text():
@@ -88,6 +88,13 @@ def test_serialize_buttons_and_list():
 async def test_send_is_noop_ok():
     res = await WebChannel().send("s1", OutboundMessage(text="oi"))
     assert res.ok is True
+
+
+async def test_send_poll_unsupported_no_http(fake_httpx):
+    res = await WebChannel().send("s1", OutboundMessage(
+        poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+    assert res.ok is False and res.error == "poll_unsupported"
+    assert fake_httpx.calls == []
 
 
 async def test_fetch_media_not_supported():

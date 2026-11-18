@@ -6,6 +6,7 @@ from cogno_gateway import (
     ChannelConfig,
     MessageKind,
     OutboundMessage,
+    Poll,
     Reaction,
     TelegramChannel,
 )
@@ -150,6 +151,13 @@ async def test_send_reaction(fake_httpx):
     await _ch().send("42", OutboundMessage(reaction=Reaction("👍", "7")))
     react = [c for c in fake_httpx.calls if "setMessageReaction" in c["url"]]
     assert react and body_of(react[0])["reaction"][0]["emoji"] == "👍"
+
+
+async def test_send_poll_unsupported_no_http(fake_httpx):
+    res = await _ch().send("42", OutboundMessage(
+        poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+    assert res.ok is False and res.error == "poll_unsupported"
+    assert fake_httpx.calls == []
 
 
 async def test_send_voice_note(fake_httpx):
