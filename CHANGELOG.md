@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.14 — 2026-11-18
+
+### Added
+- **The gateway now READS a WhatsApp poll vote.** A new inbound `MessageKind.POLL_VOTE` and a
+  frozen `PollVote(poll_message_id, poll_id="", selected=None, retracted=False)` carry who voted
+  what, on which poll. `InboundMessage.poll_vote` holds it (keyword-only, hidden from `repr` at
+  its default, so a message without a vote is byte for byte as before). `EvolutionChannel.parse_inbound`
+  gains a `pollUpdateMessage` branch beside the reaction branch: `poll_message_id` is the id of the
+  message that CREATED the poll (`pollUpdateMessage.pollCreationMessageKey.id`), and `selected` is
+  the chosen option names (`pollUpdateMessage.vote.selectedOptions`) as a tuple when the provider
+  delivered a non-empty list of them. An empty `selectedOptions`, a missing `vote`, or no names
+  parse to `selected=None` — **UNREAD**, never an abstention: an empty WhatsApp vote is ambiguous
+  (a withdrawal or a failed decryption), and counting it as "voted for nothing" would invent a
+  result. `poll_id` and `retracted` stay at their defaults on a WhatsApp vote (both are reserved
+  for the Telegram `poll_answer`). The group invariants (`participantAlt` resolves the author;
+  `fromMe` is dropped) hold as before. No option name reaches a log line, and no new `event=` is
+  emitted. `PollVote` is exported from the package.
+
 ## 0.1.13 — 2026-11-17
 
 ### Added

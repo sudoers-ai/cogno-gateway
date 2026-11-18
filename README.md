@@ -28,9 +28,11 @@ await tg.send(msg.sender, OutboundMessage(text="resposta"))   # auto-chunked
 
 ## Rich, content-typed messages
 
-`InboundMessage.kind` is a `MessageKind`: `TEXT · IMAGE · AUDIO · VIDEO · DOCUMENT · LOCATION · REACTION · STICKER · INTERACTIVE`. So a host handles **reactions** (emoji + target message id), **media** (a `MediaRef` resolved lazily via `fetch_media` — e.g. to feed audio to cogno-vox), **quick-reply buttons** (send `OutboundMessage(buttons=[Button(...)])`; the tap returns `kind=INTERACTIVE` with `selection.id`), replies, and plain text uniformly across channels.
+`InboundMessage.kind` is a `MessageKind`: `TEXT · IMAGE · AUDIO · VIDEO · DOCUMENT · LOCATION · REACTION · STICKER · INTERACTIVE · POLL_VOTE`. So a host handles **reactions** (emoji + target message id), **media** (a `MediaRef` resolved lazily via `fetch_media` — e.g. to feed audio to cogno-vox), **quick-reply buttons** (send `OutboundMessage(buttons=[Button(...)])`; the tap returns `kind=INTERACTIVE` with `selection.id`), replies, and plain text uniformly across channels.
 
 To **send a poll**, attach a `Poll` to `OutboundMessage(poll=Poll(question, options, multiple=False))` — a question with 2–12 named options (validated at construction; the vote returns by option name). Only WhatsApp via `EvolutionChannel` sends it today (`message/sendPoll`); `TelegramChannel`, `WhatsAppCloudChannel` and `WebChannel` return `SendResult(ok=False, error="poll_unsupported")` with no outbound call.
+
+To **read a poll vote**, a `kind=POLL_VOTE` message carries a `PollVote` in `poll_vote`: `poll_message_id` is the id of the message that created the poll (the key to look it up by), and `selected` is the chosen option names as a tuple — or `None`, meaning the vote was **unread** (an empty or undecryptable WhatsApp vote), never an abstention. Only WhatsApp via `EvolutionChannel` parses it today (`pollUpdateMessage`, decrypted against the creating message).
 
 To **send** media back, attach a `MediaRef` to `OutboundMessage(media=[...])`. A JPEG or PNG (the `cogno_gateway.IMAGE_MIMES` set) is delivered as a **visible image** on every channel — Telegram `sendPhoto`, WhatsApp `sendMedia` with `mediatype: image`, Cloud API `type: image` — so it shows inline in the chat rather than as a file to download. Any other MIME, WebP included, or a `MediaRef` with no MIME, still goes as a document.
 
