@@ -153,9 +153,100 @@ async def test_send_reaction(fake_httpx):
     assert react and body_of(react[0])["reaction"][0]["emoji"] == "👍"
 
 
-async def test_send_poll_unsupported_no_http(fake_httpx):
+# ── sendPoll (0.1.15): native, NON-ANONYMOUS, with the created poll's id back ──────────────
+# Eleven invented-rare option labels: ten are at Telegram's cap, the eleventh is one over it.
+_ELEVEN_OPTIONS = ("Astra", "Belmo", "Caldi", "Dorne", "Everic", "Fyntar",
+                   "Gleov", "Holmic", "Ivren", "Jocalt", "Kryver")
+
+
+async def test_send_poll_is_non_anonymous_and_returns_the_poll_id(fake_httpx):
+    fake_httpx.routes = {"sendPoll": FakeResponse(
+        {"result": {"message_id": 77, "poll": {"id": "QPOLL-INVENTADO-1"}}})}
     res = await _ch().send("42", OutboundMessage(
         poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+    calls = [c for c in fake_httpx.calls if "sendPoll" in c["url"]]
+    assert len(calls) == 1
+    body = body_of(calls[0])
+    # non-anonymous (so poll_answer carries the voter), single-answer, the question, the options
+    assert body == {"chat_id": "42", "question": "Qual turno prefere?",
+                    "options": ["Manhã", "Tarde"],
+                    "is_anonymous": False, "allows_multiple_answers": False}
+    # the created poll's id is carried back; the poll message id rides in message_ids as usual
+    assert res.ok is True and res.poll_id == "QPOLL-INVENTADO-1"
+    assert res.message_ids == ["77"]
+
+
+async def test_send_poll_option_shape_is_a_list_of_strings(fake_httpx):
+    fake_httpx.routes = {"sendPoll": FakeResponse({"result": {"message_id": 1}})}
+    await _ch().send("42", OutboundMessage(poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+    options = body_of([c for c in fake_httpx.calls if "sendPoll" in c["url"]][0])["options"]
+    # Bot API 7.0 shape: a JSON array of plain strings, not InputPollOption objects.
+    assert options == ["Manhã", "Tarde"] and all(isinstance(o, str) for o in options)
+
+
+async def test_send_poll_multiple_allows_multiple_answers(fake_httpx):
+    fake_httpx.routes = {"sendPoll": FakeResponse({"result": {"message_id": 2}})}
+    await _ch().send("42", OutboundMessage(
+        poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"), multiple=True)))
+    body = body_of([c for c in fake_httpx.calls if "sendPoll" in c["url"]][0])
+    assert body["allows_multiple_answers"] is True
+
+
+async def test_send_poll_at_the_option_cap_still_sends(fake_httpx):
+    # ten options is exactly the Bot API cap — it sends, it is not refused.
+    fake_httpx.routes = {"sendPoll": FakeResponse(
+        {"result": {"message_id": 3, "poll": {"id": "QPOLL-INVENTADO-2"}}})}
+    res = await _ch().send("42", OutboundMessage(
+        poll=Poll("Escolha uma", _ELEVEN_OPTIONS[:10])))
+    assert res.ok is True and res.poll_id == "QPOLL-INVENTADO-2"
+    assert len([c for c in fake_httpx.calls if "sendPoll" in c["url"]]) == 1
+    assert len(body_of([c for c in fake_httpx.calls if "sendPoll" in c["url"]][0])["options"]) == 10
+
+
+async def test_send_poll_above_the_option_cap_is_unsupported_no_http_no_cut(fake_httpx):
+    # eleven options (the Poll type allows up to 12, Telegram caps at 10): refuse OUTRIGHT,
+    # never cut the ballot down to ten and send a mutilated poll.
+    res = await _ch().send("42", OutboundMessage(poll=Poll("Escolha uma", _ELEVEN_OPTIONS)))
+    assert res.ok is False and res.error == "poll_unsupported"
+    assert res.poll_id == ""
+    assert fake_httpx.calls == []
+
+
+async def test_send_poll_sends_text_first_then_poll_in_order(fake_httpx):
+    # A host builds ONE message (introduction + poll) for every channel; on Telegram the text goes
+    # out FIRST, then the poll — as on WhatsApp — and no buttons/media body is emitted.
+    fake_httpx.routes = {
+        "sendMessage": FakeResponse({"result": {"message_id": 10}}),
+        "sendPoll": FakeResponse(
+            {"result": {"message_id": 11, "poll": {"id": "QPOLL-INVENTADO-3"}}}),
+    }
+    res = await _ch().send("42", OutboundMessage(
+        text="Escolha o turno:", poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+    endpoints = [c["url"].rsplit("/", 1)[1] for c in fake_httpx.calls]
+    assert endpoints == ["sendMessage", "sendPoll"]
+    # the text body is exactly the plain-reply body (no reply_markup, no media)
+    assert body_of([c for c in fake_httpx.calls if "sendMessage" in c["url"]][0]) == {
+        "chat_id": "42", "text": "Escolha o turno:"}
+    # ids are the text's THEN the poll's, in order; poll_id is the poll's
+    assert res.ok is True and res.message_ids == ["10", "11"]
+    assert res.poll_id == "QPOLL-INVENTADO-3"
+
+
+async def test_send_poll_when_the_text_fails_the_poll_is_not_sent(fake_httpx):
+    # the text send fails → the poll never goes out and the whole send fails, with no token leaked
+    fake_httpx.routes = {"sendMessage": FakeResponse(status=500)}
+    res = await _ch().send("42", OutboundMessage(
+        text="Escolha o turno:", poll=Poll("Qual turno prefere?", ("Manhã", "Tarde"))))
+    assert res.ok is False
+    assert [c for c in fake_httpx.calls if "sendPoll" in c["url"]] == []
+    assert "BOT123" not in res.error
+
+
+async def test_send_poll_above_the_cap_with_text_refuses_before_any_send(fake_httpx):
+    # eleven options WITH text: the refusal is BEFORE any send — not even the text goes out, so a
+    # refused poll leaves no orphaned introduction behind.
+    res = await _ch().send("42", OutboundMessage(
+        text="Escolha o turno:", poll=Poll("Escolha uma", _ELEVEN_OPTIONS)))
     assert res.ok is False and res.error == "poll_unsupported"
     assert fake_httpx.calls == []
 
