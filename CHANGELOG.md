@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.17 — 2026-11-24
+
+### Added
+- **A group reply can @-mention its members.** `OutboundMessage.mentions` is a list of `Mention`
+  (`user_id`, `label`) — the host composes it (never the model). `user_id` is the member's id at the
+  provider (a WhatsApp phone JID `<digits>@s.whatsapp.net` or LID `<digits>@lid`, a Telegram numeric
+  id); `label` is the display name a channel shows when it cannot notify. At most `MAX_MENTIONS` (3)
+  ride on one message.
+- **`Channel.mention_token(user_id, label)` is the single definition of how a mention APPEARS in a
+  channel's text**, so a host composes the reply with it and never writes an `@` by hand. On
+  `EvolutionChannel` a mentionable id yields `"@" + <digits>` (WhatsApp renders it on each phone as
+  the contact's own name); every other channel returns the plain `label` (the shared no-notify rule).
+- **`EvolutionChannel` sends the WhatsApp mention.** With `OutboundMessage.mentions`, `sendText`
+  carries `"mentioned": [<ids>]` — and ONLY on the chunk whose text holds the tokens. It never sends
+  `mentionsEveryOne`. A `mentions` longer than `MAX_MENTIONS` raises `ValueError` before any HTTP (the
+  net; the host never asks for it). A mentionable id whose token the host left out of the text is
+  dropped from `mentioned` and logged `event=mention_token_absent`, carrying no id.
+- **A LID is never mentioned on Evolution.** This Evolution/Baileys version does not reliably carry a
+  LID through an outbound mention, so a `<digits>@lid` `user_id` falls back to the plain `label` (no
+  `@`) and is left out of `mentioned`. A host mentions a member by the PHONE JID the parser exposes as
+  a group message's `author` (`key.participantAlt`).
+- **Every other channel ignores `mentions` and logs `event=mentions_unsupported`** (no id): Telegram
+  (until a later piece grows group mentions), the WhatsApp Cloud API (no groups), and the web widget
+  send the text exactly as before.
+
 ## 0.1.16 — 2026-11-18
 
 ### Added

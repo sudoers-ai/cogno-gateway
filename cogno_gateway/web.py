@@ -26,6 +26,7 @@ from cogno_gateway.types import (
     OutboundMessage,
     Reaction,
     SendResult,
+    label_mention_token,
 )
 
 logger = logging.getLogger("cogno_gateway.web")
@@ -107,7 +108,16 @@ class WebChannel:
             "directly rather than fetching by reference."
         )
 
+    def mention_token(self, user_id: str, label: str = "") -> str:
+        """The web widget has no group surface, so a mention is the plain ``label`` with no
+        notification (the shared no-notify rule, ``label_mention_token``)."""
+        return label_mention_token(user_id, label)
+
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
+        if message.mentions:
+            # No group surface on the web widget; the text goes as-is, with no @-notification. Say
+            # so, carrying no id (the log-policy mould).
+            logger.warning("channel=web event=mentions_unsupported")
         if message.poll is not None:
             # The web widget has no poll surface; refuse rather than drop it (and emit nothing).
             return SendResult(ok=False, error="poll_unsupported")

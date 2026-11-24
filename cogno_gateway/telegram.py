@@ -36,6 +36,7 @@ from cogno_gateway.types import (
     Reaction,
     SendResult,
     image_mime,
+    label_mention_token,
 )
 
 logger = logging.getLogger("cogno_gateway.telegram")
@@ -554,6 +555,11 @@ class TelegramChannel:
             return dl.content
 
     # ── send ──────────────────────────────────────────────────────────
+    def mention_token(self, user_id: str, label: str = "") -> str:
+        """Telegram group mentions arrive in a later piece; until then a mention is the plain
+        ``label`` with no notification (the shared no-notify rule, ``label_mention_token``)."""
+        return label_mention_token(user_id, label)
+
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
         """Send a reply. Each provider call goes through :meth:`_post`, which retries once on a
         transport failure — read that method before changing anything here, the duplicate-message
@@ -567,6 +573,10 @@ class TelegramChannel:
         A reply carrying a :class:`Poll` is sent by :meth:`_send_poll`: any text goes FIRST,
         through the same path as a plain reply, then the poll — as on WhatsApp — so an
         introduction is never silently dropped. Buttons and media do not ride with a poll."""
+        if message.mentions:
+            # Telegram group mentions arrive in a later piece; until then the text goes as-is, with
+            # no @-notification. Say so, carrying no id (the log-policy mould).
+            logger.warning("channel=telegram event=mentions_unsupported")
         if message.poll is not None:
             return await self._send_poll(recipient, message)
         ids: list[str] = []

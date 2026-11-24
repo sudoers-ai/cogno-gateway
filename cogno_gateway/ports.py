@@ -45,6 +45,14 @@ class Channel(Protocol):
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
         """Send a reply to ``recipient`` (chat id / remoteJid / session id)."""
 
+    def mention_token(self, user_id: str, label: str = "") -> str:
+        """How an @-mention of ``user_id`` APPEARS in this channel's text — the single place that
+        rule lives, so a host composes a group reply with it and never writes an ``@`` by hand.
+
+        ``label`` is the member's display name, shown as-is by a channel that cannot notify a
+        mention (every channel but Evolution today). On ``EvolutionChannel`` a mentionable id yields
+        ``"@" + <digits>``, which WhatsApp renders on each phone as the contact's own name."""
+
 
 @runtime_checkable
 class PresenceAwareChannel(Protocol):

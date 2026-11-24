@@ -358,6 +358,39 @@ _GROUP_FIELDS = ("conversation_id", "author", "mentions_bot", "mentioned_ids", "
                  "reply_to_message_id", "author_is_bot", "membership", "poll_vote")
 
 
+@dataclass(frozen=True)
+class Mention:
+    """One member to @-mention in a GROUP reply (outbound).
+
+    ``user_id`` is the member's id AT THE PROVIDER — a WhatsApp phone JID (``<digits>@s.whatsapp.net``)
+    or LID (``<digits>@lid``), a Telegram numeric id — the same value a channel's ``author`` /
+    ``mentioned_ids`` carry inbound. ``label`` is the member's display name, shown by a channel that
+    cannot NOTIFY a mention, and also what a WhatsApp member sees in place of the ``@`` token (WhatsApp
+    renders a mention as the contact's own name).
+
+    Frozen, so a composed reply's mentions cannot be mutated after the host hands them over. How a
+    mention APPEARS in the text is :meth:`Channel.mention_token`, never written by hand; at most
+    :data:`MAX_MENTIONS` ride on one message (more raises ``ValueError`` at send)."""
+
+    user_id: str
+    label: str = ""
+
+
+#: The most members one message may @-mention. The host never composes more; a send given more
+#: raises ``ValueError`` — the net, not a path the host is expected to reach.
+MAX_MENTIONS = 3
+
+
+def label_mention_token(user_id: str, label: str) -> str:
+    """The mention token for a channel that cannot NOTIFY a mentioned member — every channel but
+    Evolution today (Telegram until it grows group mentions in a later piece, the WhatsApp Cloud API
+    which has no groups, the web widget): the plain ``label``, no ``@``, so the reply reads naturally
+    and nobody is pinged. The single definition of that rule, shared by those channels'
+    ``mention_token``. ``user_id`` is unused but kept so every ``mention_token`` has the one signature
+    the host calls."""
+    return label
+
+
 @dataclass
 class OutboundMessage:
     """A reply to send back. ``audio`` carries voice-note bytes (e.g. from a
@@ -378,6 +411,12 @@ class OutboundMessage:
     # is not a positive integer is ignored. "" (the default) sends exactly as before. Other
     # adapters ignore it.
     reply_to_message_id: str = ""
+    # Members to @-mention in a GROUP reply. Composed by the HOST, never the model: the host puts
+    # each one's ``Channel.mention_token`` in ``text`` and lists the Mention here. Only
+    # ``EvolutionChannel`` notifies (WhatsApp) — it sends ``mentioned`` on the chunk that carries the
+    # tokens; the other channels send the text as-is and log ``mentions_unsupported``. At most
+    # ``MAX_MENTIONS`` — more raises ``ValueError`` at send. ``[]`` (the default) sends as before.
+    mentions: list[Mention] = field(default_factory=list)
 
 
 @dataclass

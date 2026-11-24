@@ -36,6 +36,16 @@ To **read a poll vote**, a `kind=POLL_VOTE` message carries a `PollVote` in `pol
 
 To **send** media back, attach a `MediaRef` to `OutboundMessage(media=[...])`. A JPEG or PNG (the `cogno_gateway.IMAGE_MIMES` set) is delivered as a **visible image** on every channel — Telegram `sendPhoto`, WhatsApp `sendMedia` with `mediatype: image`, Cloud API `type: image` — so it shows inline in the chat rather than as a file to download. Any other MIME, WebP included, or a `MediaRef` with no MIME, still goes as a document.
 
+To **@-mention members** in a group reply, list them in `OutboundMessage(mentions=[Mention(user_id, label)])` and place each one's `channel.mention_token(user_id, label)` in the `text` — the host composes the text with the token and never writes an `@` by hand:
+
+```python
+from cogno_gateway import Mention
+tok = wa.mention_token(author_jid, "Ana")                      # "@5511999999999" on WhatsApp
+await wa.send(room_jid, OutboundMessage(text=f"{tok} done ✅", mentions=[Mention(author_jid, "Ana")]))
+```
+
+`mention_token` is the single definition of how a mention appears per channel. On **WhatsApp** via `EvolutionChannel` it is `"@" + <id digits>` (WhatsApp shows each member the contact's own name in place of the token); `EvolutionChannel` then sends `sendText` with `"mentioned": [<ids>]`, only on the chunk that carries the tokens, and never `mentionsEveryOne`. At most `MAX_MENTIONS` (3) per message — more raises `ValueError` before any call. A **LID** (`<digits>@lid`) cannot be mentioned in this Evolution version, so its token is the plain label and it is left out of `mentioned` (mention a member by the phone JID the parser exposes as `author`). On **Telegram** (until a later release), the **WhatsApp Cloud API** (no groups) and the **web widget**, `mention_token` returns the plain `label`, the text is sent as-is, and the send logs `event=mentions_unsupported` (no id). See [`docs/HOST_INTEGRATION.md`](docs/HOST_INTEGRATION.md#3-replying-outbound).
+
 ## 1:1 by default — groups only on Telegram, only when the host opts in
 
 By default every adapter drops group traffic at parse (Telegram `group`/`supergroup`, Evolution
