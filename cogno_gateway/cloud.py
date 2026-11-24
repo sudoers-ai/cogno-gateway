@@ -53,6 +53,7 @@ from cogno_gateway.types import (
     Reaction,
     SendResult,
     image_mime,
+    label_mention_token,
 )
 
 logger = logging.getLogger("cogno_gateway.cloud")
@@ -223,7 +224,16 @@ class WhatsAppCloudChannel:
             return dl.content
 
     # ── send ──────────────────────────────────────────────────────────
+    def mention_token(self, user_id: str, label: str = "") -> str:
+        """The WhatsApp Cloud API has no group surface, so a mention is the plain ``label`` with no
+        notification (the shared no-notify rule, ``label_mention_token``)."""
+        return label_mention_token(user_id, label)
+
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
+        if message.mentions:
+            # No group surface on the Cloud API; the text goes as-is, with no @-notification. Say
+            # so, carrying no id (the log-policy mould).
+            logger.warning("channel=whatsapp_cloud event=mentions_unsupported")
         if message.poll is not None:
             # The official WhatsApp Cloud API has no poll message type; refuse, no HTTP.
             return SendResult(ok=False, error="poll_unsupported")

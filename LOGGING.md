@@ -52,6 +52,14 @@ veja `cogno/core/logging.py` no host como referência.
   põe a raiz em INFO mantém `logging.getLogger("httpx")` em WARNING. É um requisito do
   host, e o host de referência já o cumpre: a sua configuração de logging de produção
   fixa o `httpx` em WARNING entre os tectos por pacote.
+- **`event=mentions_unsupported` and `event=mention_token_absent` carry NO id** — a mention's
+  `user_id` and `label` are the member's own data, so neither ever reaches a log line (the same rule
+  as `outbound_markup` below). `mentions_unsupported` is a WARNING on a send that was given
+  `OutboundMessage.mentions` on a channel that cannot @-notify (Telegram until a later release, the
+  WhatsApp Cloud API, the web widget): the text goes out as-is, so the line is the only record that a
+  requested notification did not happen. `mention_token_absent` is a WARNING on `EvolutionChannel`
+  when a mentionable id's `@`-token is not in the text: that id is dropped from the `sendText`
+  `mentioned` array (it would notify nobody), and the line names neither the id nor the text.
 - **INFO em `event=outbound_markup`, e é a segunda excepção declarada** — esta à
   regra «INFO não é happy-path por request». A linha dispara em **todos** os
   envios e mesmo assim tem de ser INFO: a conversão de negrito por canal acontece

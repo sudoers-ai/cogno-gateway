@@ -28,10 +28,12 @@ from cogno_gateway.net import build_async_client
 from cogno_gateway.retry import post_with_retry
 from cogno_gateway.ports import GatewayError
 from cogno_gateway.types import (
+    MAX_MENTIONS,
     ButtonReply,
     ChannelConfig,
     InboundMessage,
     MediaRef,
+    Mention,
     MessageKind,
     OutboundMessage,
     PollVote,
@@ -50,6 +52,23 @@ _MEDIA_TYPES = {
     "documentMessage": MessageKind.DOCUMENT,
     "stickerMessage": MessageKind.STICKER,
 }
+
+
+def _whatsapp_mention_digits(user_id: str) -> str:
+    """The digit string WhatsApp @-mentions ``user_id`` by, or ``""`` when it cannot be mentioned.
+
+    A phone JID (``<digits>@s.whatsapp.net``) or a bare number yields its local digits; a LID
+    (``<digits>@lid``) — or any non-numeric local part — yields ``""``. WhatsApp identifies a mention
+    by the member's id, and this Evolution/Baileys version does not reliably carry a LID through an
+    OUTBOUND mention (the send path does not translate ``@lid`` → phone JID, and a send addressed by
+    a raw LID can be rejected), so a LID is never mentioned: its token falls back to the label and
+    the id is left out of ``mentioned``. The member's PHONE JID is what the parser already exposes as
+    a group message's ``author`` (``key.participantAlt``) — the id a host mentions them by."""
+    jid = (user_id or "").strip()
+    if not jid or jid.endswith("@lid"):
+        return ""
+    local = jid.split("@", 1)[0]
+    return local if local.isdigit() else ""
 
 
 class EvolutionChannel:
@@ -360,8 +379,33 @@ class EvolutionChannel:
         duplicate a message Evolution already accepted."""
         return await post_with_retry("whatsapp", client, url, **kwargs)
 
+    def mention_token(self, user_id: str, label: str = "") -> str:
+        """How a WhatsApp @-mention of ``user_id`` appears in the text: ``"@" + <id digits>`` for a
+        mentionable id (a phone JID or bare number), which WhatsApp renders on each member's phone as
+        the contact's own name. A LID cannot be mentioned here (see ``_whatsapp_mention_digits``), so
+        its token is the plain ``label`` and no notification is sent. The host composes the text with
+        this; the gateway never writes the ``@`` by hand."""
+        digits = _whatsapp_mention_digits(user_id)
+        return "@" + digits if digits else label
+
+    @staticmethod
+    def _mentioned_in(chunk: str, mentions: list[Mention]) -> list[str]:
+        """The ids for a ``sendText`` body's ``mentioned`` on THIS chunk: a mention whose ``@`` token
+        falls in this chunk's text. A non-mentionable id (a LID) has no ``@`` token and is never
+        included; ``mentionsEveryOne`` is never sent."""
+        out: list[str] = []
+        for m in mentions:
+            digits = _whatsapp_mention_digits(m.user_id)
+            if digits and ("@" + digits) in chunk:
+                out.append(m.user_id)
+        return out
+
     # ── send ──────────────────────────────────────────────────────────
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
+        # The net: the host never composes more than MAX_MENTIONS, so more is a bug — refuse before
+        # any HTTP rather than let WhatsApp decide. ``mentionsEveryOne`` is never sent (below).
+        if len(message.mentions) > MAX_MENTIONS:
+            raise ValueError("OutboundMessage.mentions must not exceed MAX_MENTIONS")
         ids: list[str] = []
         # A hidden-phone sender arrives as `<digits>@lid` (not `@s.whatsapp.net`) — the bare
         # digits are NOT a phone number and don't route, so keep the full JID for those.
@@ -373,6 +417,12 @@ class EvolutionChannel:
         # them behind.
         text = to_channel_markup(message.text, self.name)
         log_outbound_markup(logger, "whatsapp", message.text, text)
+        # A mentionable id whose token the host left out of the text is dropped from ``mentioned``
+        # (it would notify nobody); say so once, carrying no id (the log-policy mould).
+        for mention in message.mentions:
+            digits = _whatsapp_mention_digits(mention.user_id)
+            if digits and ("@" + digits) not in text:
+                logger.warning("channel=whatsapp event=mention_token_absent")
         async with build_async_client(self._cfg) as client:
             try:
                 if message.reaction:
@@ -388,9 +438,13 @@ class EvolutionChannel:
                     # question and the options are third-party text — they are the poll BODY,
                     # never a log value.
                     for chunk in split_message(text, max_chars=max_chars):
+                        body: dict = {"number": number, "text": chunk}
+                        mentioned = self._mentioned_in(chunk, message.mentions)
+                        if mentioned:
+                            body["mentioned"] = mentioned
                         resp = await self._post(client,
                             f"{self._base}/message/sendText/{self._instance}",
-                            headers=self._headers(), json={"number": number, "text": chunk})
+                            headers=self._headers(), json=body)
                         ids.append(str(resp.json().get("key", {}).get("id", "")))
                     options = list(message.poll.options)
                     resp = await self._post(client,
@@ -422,9 +476,13 @@ class EvolutionChannel:
                     ids.append(str(resp.json().get("key", {}).get("id", "")))
                 else:
                     for chunk in split_message(text, max_chars=max_chars):
+                        body = {"number": number, "text": chunk}
+                        mentioned = self._mentioned_in(chunk, message.mentions)
+                        if mentioned:
+                            body["mentioned"] = mentioned
                         resp = await self._post(client,
                             f"{self._base}/message/sendText/{self._instance}",
-                            headers=self._headers(), json={"number": number, "text": chunk})
+                            headers=self._headers(), json=body)
                         ids.append(str(resp.json().get("key", {}).get("id", "")))
                 if message.audio is not None:
                     audio_b64 = base64.b64encode(message.audio).decode("ascii")

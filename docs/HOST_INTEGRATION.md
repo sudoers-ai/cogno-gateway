@@ -209,6 +209,42 @@ reply), and the rest go out as before. A value that is not a positive integer is
 the other adapters ignore the field. A button tapped in a group is dropped at parse, so a group
 reply should carry none.
 
+**@-mentioning members in a group (WhatsApp, 0.1.17).** List the members in
+`OutboundMessage(mentions=[Mention(user_id, label)])` and compose the `text` with each one's
+`channel.mention_token(user_id, label)` — the host writes the token, never a bare `@`:
+
+```python
+from cogno_gateway import Mention
+tok = wa.mention_token(author_jid, "Ana")                       # "@5511999999999" on WhatsApp
+await wa.send(room_jid, OutboundMessage(text=f"{tok} done ✅", mentions=[Mention(author_jid, "Ana")]))
+```
+
+`Channel.mention_token` is the **single definition** of how a mention appears in a channel's text,
+so the rule lives in one place and the host never hard-codes an `@`:
+
+| channel | `mention_token(user_id, label)` | sends a notification? |
+|---|---|---|
+| `EvolutionChannel` (WhatsApp) | `"@" + <id digits>` for a mentionable id; the plain `label` for a LID | yes, via `sendText` `mentioned` |
+| `TelegramChannel` | the plain `label` (group mentions arrive in a later release) | no |
+| `WhatsAppCloudChannel` | the plain `label` (the Cloud API has no groups) | no |
+| `WebChannel` | the plain `label` | no |
+
+On **WhatsApp**, `EvolutionChannel.send` adds `"mentioned": [<the ids>]` to the `sendText` body, and
+**only on the chunk whose text holds the tokens**; it never sends `mentionsEveryOne`. WhatsApp shows
+each member the contact's own name in place of the `@` token. The limits and edges:
+
+- **At most `MAX_MENTIONS` (3)** on one message. More raises `ValueError` **before any HTTP** — the
+  host is expected never to compose more, so this is the net, not a path to handle.
+- **A LID (`<digits>@lid`) is never mentioned.** This Evolution/Baileys version does not reliably
+  carry a LID through an outbound mention, so a LID `user_id` yields the plain `label` (no `@`) and is
+  left out of `mentioned`. Mention a member by the **phone JID** the parser exposes as a group
+  message's `author` (`key.participantAlt`), which is the id WhatsApp mentions them by.
+- **A token the host forgot** — a mentionable id whose `@`-token is not in the `text` — is dropped
+  from `mentioned` (it would notify nobody) and logged `event=mention_token_absent`, with no id.
+
+Every other channel ignores `mentions`, sends the text unchanged, and logs
+`event=mentions_unsupported` (no id).
+
 Buttons render natively per channel — Telegram inline keyboard, WhatsApp Cloud
 interactive buttons, Evolution `sendButtons`. The user's tap comes back as an
 `INTERACTIVE` inbound carrying `selection.id` (`"confirm"` / `"cancel"`).
