@@ -382,12 +382,13 @@ MAX_MENTIONS = 3
 
 
 def label_mention_token(user_id: str, label: str) -> str:
-    """The mention token for a channel that cannot NOTIFY a mentioned member — every channel but
-    Evolution today (Telegram until it grows group mentions in a later piece, the WhatsApp Cloud API
-    which has no groups, the web widget): the plain ``label``, no ``@``, so the reply reads naturally
-    and nobody is pinged. The single definition of that rule, shared by those channels'
-    ``mention_token``. ``user_id`` is unused but kept so every ``mention_token`` has the one signature
-    the host calls."""
+    """The mention token whose visible form is the plain ``label`` — no ``@`` — so the reply reads
+    naturally. The single definition of that rule, shared by every channel but Evolution: the WhatsApp
+    Cloud API (which has no groups) and the web widget, neither of which notifies at all, and Telegram,
+    which DOES notify but carries the ping in a ``text_mention`` entity placed OVER this label at send
+    (``TelegramChannel.send``), not in the token text — so the token stays the bare name there too.
+    Only ``EvolutionChannel`` puts an ``@`` in the token itself. ``user_id`` is unused but kept so
+    every ``mention_token`` has the one signature the host calls."""
     return label
 
 
@@ -412,9 +413,10 @@ class OutboundMessage:
     # adapters ignore it.
     reply_to_message_id: str = ""
     # Members to @-mention in a GROUP reply. Composed by the HOST, never the model: the host puts
-    # each one's ``Channel.mention_token`` in ``text`` and lists the Mention here. Only
-    # ``EvolutionChannel`` notifies (WhatsApp) — it sends ``mentioned`` on the chunk that carries the
-    # tokens; the other channels send the text as-is and log ``mentions_unsupported``. At most
+    # each one's ``Channel.mention_token`` in ``text`` and lists the Mention here. ``EvolutionChannel``
+    # notifies (WhatsApp) by sending ``mentioned`` on the chunk that carries the tokens;
+    # ``TelegramChannel`` notifies by placing a ``text_mention`` entity over each token; the remaining
+    # channels (WhatsApp Cloud, web) send the text as-is and log ``mentions_unsupported``. At most
     # ``MAX_MENTIONS`` — more raises ``ValueError`` at send. ``[]`` (the default) sends as before.
     mentions: list[Mention] = field(default_factory=list)
 

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.18 — 2026-11-25
+
+### Added
+- **`TelegramChannel` sends the Telegram mention.** With `OutboundMessage.mentions`, each member
+  becomes a `text_mention` entity on `sendMessage`, placed over that member's token (which on Telegram
+  is the plain `label`) and carrying their numeric `user.id` — which is how Telegram pings a member
+  who has no public `@username`. The entity `offset` and `length` are in **UTF-16 code units**
+  (Telegram's unit), so an emoji before or inside a name — a surrogate pair — counts as two and every
+  following entity still lines up. Entities ride only on the chunk whose text holds the token.
+- **No `parse_mode`, no collision.** This gateway sends the body literally (no `parse_mode` on
+  `sendMessage`), so the `text_mention` entities are the only parse surface; the text is unchanged.
+- **The same net as WhatsApp.** A `mentions` longer than `MAX_MENTIONS` (3) raises `ValueError` before
+  any HTTP (it also guards the poll path). A mention whose token the host left out of the final text
+  gets no entity and is logged `event=mention_token_absent`, carrying no id; a `user_id` that is not a
+  Telegram numeric id yields no entity. A reply with no mentions is byte for byte what it was.
+
+### Changed
+- **`mention_token` for Telegram is unchanged (the plain `label`)**, but Telegram is no longer a
+  "cannot notify" channel: the notification now rides in the `text_mention` entity, not the token. The
+  WhatsApp Cloud API (no groups) and the web widget still ignore `mentions` and log
+  `event=mentions_unsupported`.
+
 ## 0.1.17 — 2026-11-24
 
 ### Added

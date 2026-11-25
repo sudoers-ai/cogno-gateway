@@ -27,9 +27,11 @@ from cogno_gateway.types import (
     ChannelConfig,
     MEMBERSHIP_JOINED,
     MEMBERSHIP_LEFT,
+    MAX_MENTIONS,
     InboundMessage,
     MediaRef,
     Membership,
+    Mention,
     MessageKind,
     OutboundMessage,
     PollVote,
@@ -63,6 +65,15 @@ _MAX_POLL_OPTIONS = 10
 # side of this call and the host is holding a turn open; a long backoff turns a lost reply
 # into a late one, which on a chat channel is barely better.
 _RETRY_BACKOFF_SECONDS = 0.5
+
+
+def _utf16_len(s: str) -> int:
+    """The length of ``s`` in UTF-16 code units — Telegram's unit for a message entity's ``offset``
+    and ``length`` (core.telegram.org/api/entities). A character outside the Basic Multilingual Plane
+    (an emoji, say) is a surrogate PAIR there and counts as TWO, which ``len(s)`` (code points) would
+    undercount by one per astral character, pushing every following entity's offset off by that much.
+    Encoding to ``utf-16-le`` (no BOM) and halving the byte count gives the unit count directly."""
+    return len(s.encode("utf-16-le")) // 2
 
 
 #: What the bot token becomes wherever this module reports an error. The token sits in the PATH
@@ -556,9 +567,41 @@ class TelegramChannel:
 
     # ── send ──────────────────────────────────────────────────────────
     def mention_token(self, user_id: str, label: str = "") -> str:
-        """Telegram group mentions arrive in a later piece; until then a mention is the plain
-        ``label`` with no notification (the shared no-notify rule, ``label_mention_token``)."""
+        """How a Telegram @-mention appears in the text: the plain ``label``, no ``@`` (the shared
+        token-is-the-label rule, ``label_mention_token``). Telegram notifies the member NOT through
+        the token but through a ``text_mention`` entity placed OVER this label at send (see
+        :meth:`send`), so the token stays the name the room reads and nothing is hard-coded here."""
         return label_mention_token(user_id, label)
+
+    def _mention_entities(self, chunk: str, mentions: list[Mention]) -> list[dict]:
+        """The Telegram ``text_mention`` entities for THIS chunk: one per mention whose token occurs
+        in it, spanning the token and carrying the member's numeric ``user.id`` — which is how
+        Telegram pings a member who has no public ``@username``.
+
+        The token is :meth:`mention_token` (the member's ``label``), the same value the host put in
+        the text, so the entity lands exactly on the name the room sees; ``chunk.find`` takes its
+        first occurrence. ``offset`` and ``length`` are in UTF-16 code units (:func:`_utf16_len`),
+        Telegram's unit — so an emoji before or inside the token, being a surrogate pair, counts as
+        two and the following entities still line up. A mention whose token is empty, is absent from
+        this chunk, or whose ``user_id`` is not a Telegram numeric id yields no entity (the absent
+        case is logged once in :meth:`send`, carrying no id)."""
+        out: list[dict] = []
+        for m in mentions:
+            token = self.mention_token(m.user_id, m.label)
+            if not token:
+                continue
+            idx = chunk.find(token)
+            if idx < 0:
+                continue
+            try:
+                uid = int(m.user_id)
+            except (TypeError, ValueError):
+                continue
+            out.append({"type": "text_mention",
+                        "offset": _utf16_len(chunk[:idx]),
+                        "length": _utf16_len(token),
+                        "user": {"id": uid}})
+        return out
 
     async def send(self, recipient: str, message: OutboundMessage) -> SendResult:
         """Send a reply. Each provider call goes through :meth:`_post`, which retries once on a
@@ -572,11 +615,15 @@ class TelegramChannel:
 
         A reply carrying a :class:`Poll` is sent by :meth:`_send_poll`: any text goes FIRST,
         through the same path as a plain reply, then the poll — as on WhatsApp — so an
-        introduction is never silently dropped. Buttons and media do not ride with a poll."""
-        if message.mentions:
-            # Telegram group mentions arrive in a later piece; until then the text goes as-is, with
-            # no @-notification. Say so, carrying no id (the log-policy mould).
-            logger.warning("channel=telegram event=mentions_unsupported")
+        introduction is never silently dropped. Buttons and media do not ride with a poll.
+
+        A group reply's ``mentions`` become ``text_mention`` entities on the chunk that carries each
+        member's token (see :meth:`_mention_entities`); the token itself is the plain name, so a
+        reply with no mention is byte for byte what it was. The net: more than ``MAX_MENTIONS`` on one
+        message raises ``ValueError`` before any HTTP (mirrors ``EvolutionChannel.send``), and it sits
+        above the poll branch so it guards that path too."""
+        if len(message.mentions) > MAX_MENTIONS:
+            raise ValueError("OutboundMessage.mentions must not exceed MAX_MENTIONS")
         if message.poll is not None:
             return await self._send_poll(recipient, message)
         ids: list[str] = []
@@ -588,6 +635,13 @@ class TelegramChannel:
         # this changes.
         text = to_channel_markup(message.text, self.name)
         log_outbound_markup(logger, "telegram", message.text, text)
+        # A mention whose token the host left out of the FINAL text notifies nobody (it has no span
+        # to place an entity over); say so once, carrying no id (the log-policy mould). Mirrors
+        # ``EvolutionChannel.send``. The entities themselves are built per chunk below.
+        for mention in message.mentions:
+            token = self.mention_token(mention.user_id, mention.label)
+            if token and token not in text:
+                logger.warning("channel=telegram event=mention_token_absent")
         async with build_async_client(self._cfg) as client:
             try:
                 if message.reaction:
@@ -617,6 +671,15 @@ class TelegramChannel:
                         # reply itself.
                         body["reply_parameters"] = {"message_id": reply_to,
                                                     "allow_sending_without_reply": True}
+                    entities = self._mention_entities(chunk, message.mentions)
+                    if entities:
+                        # This gateway sets NO ``parse_mode`` on ``sendMessage`` (see
+                        # ``cogno_gateway.markup`` — the body is sent literally), so these
+                        # offset-based entities are the only parse surface and the two cannot
+                        # collide: Telegram would ignore ``parse_mode`` whenever ``entities`` is
+                        # present anyway. The text is unchanged; each ``text_mention`` lands on its
+                        # own token.
+                        body["entities"] = entities
                     if markup and i == len(chunks) - 1:
                         body["reply_markup"] = markup
                     resp = await self._post(client, f"{_API}/bot{self._token}/sendMessage",
