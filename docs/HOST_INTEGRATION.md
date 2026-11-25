@@ -225,7 +225,7 @@ so the rule lives in one place and the host never hard-codes an `@`:
 | channel | `mention_token(user_id, label)` | sends a notification? |
 |---|---|---|
 | `EvolutionChannel` (WhatsApp) | `"@" + <id digits>` for a mentionable id; the plain `label` for a LID | yes, via `sendText` `mentioned` |
-| `TelegramChannel` | the plain `label` (group mentions arrive in a later release) | no |
+| `TelegramChannel` | the plain `label` | yes, via a `text_mention` entity over the token |
 | `WhatsAppCloudChannel` | the plain `label` (the Cloud API has no groups) | no |
 | `WebChannel` | the plain `label` | no |
 
@@ -242,8 +242,18 @@ each member the contact's own name in place of the `@` token. The limits and edg
 - **A token the host forgot** — a mentionable id whose `@`-token is not in the `text` — is dropped
   from `mentioned` (it would notify nobody) and logged `event=mention_token_absent`, with no id.
 
-Every other channel ignores `mentions`, sends the text unchanged, and logs
-`event=mentions_unsupported` (no id).
+On **Telegram** (0.1.18), `TelegramChannel.send` notifies the member with a `text_mention` entity on
+`sendMessage` instead of a `mentioned` array. The entity spans the member's token (the plain `label`)
+and carries their numeric `user.id`, so a member with no public `@username` is still pinged. The
+`offset` and `length` are in **UTF-16 code units** — an emoji before or inside a name is a surrogate
+pair and counts as two — and the entity rides only on the chunk whose text holds the token. The
+gateway sets no `parse_mode`, so the entities are the only parse surface and the body is sent
+literally. The same `MAX_MENTIONS` ceiling (raising `ValueError` before any HTTP) and
+`event=mention_token_absent` warning (no id) apply; a `user_id` that is not a Telegram numeric id
+yields no entity.
+
+The **WhatsApp Cloud API** (no groups) and the **web widget** ignore `mentions`, send the text
+unchanged, and log `event=mentions_unsupported` (no id).
 
 Buttons render natively per channel — Telegram inline keyboard, WhatsApp Cloud
 interactive buttons, Evolution `sendButtons`. The user's tap comes back as an

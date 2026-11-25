@@ -1,10 +1,12 @@
-"""Group @-mentions (0.1.17): how a mention APPEARS per channel, and the WhatsApp send.
+"""Group @-mentions: how a mention APPEARS per channel, and the WhatsApp + Telegram sends.
 
 The host composes a group reply's mentions and puts each one's ``channel.mention_token`` in the
-text; the gateway never writes an ``@`` by hand. Only ``EvolutionChannel`` notifies — it adds
-``mentioned`` to the ``sendText`` body, and only on the chunk that holds the tokens, never
-``mentionsEveryOne``. Every other channel sends the text as-is and logs ``mentions_unsupported``.
-No mention's id reaches a log line (the gateway's log-policy mould).
+text; the gateway never writes an ``@`` by hand. ``EvolutionChannel`` notifies by adding
+``mentioned`` to the ``sendText`` body, only on the chunk that holds the tokens, never
+``mentionsEveryOne`` (0.1.17). ``TelegramChannel`` notifies by placing a ``text_mention`` entity over
+each token, with UTF-16 offsets (0.1.18). The WhatsApp Cloud API (no groups) and the web widget still
+send the text as-is and log ``mentions_unsupported``. No mention's id reaches a log line (the
+gateway's log-policy mould).
 """
 
 import logging
@@ -151,19 +153,97 @@ async def test_no_mentions_sends_a_plain_body(fake_httpx):
         [c for c in fake_httpx.calls if "sendText" in c["url"]][0])
 
 
-# ── the other channels ignore mentions and log mentions_unsupported ──────────
+# ── TelegramChannel.send: text_mention entities, UTF-16 offsets ──────────────
+# Synthetic Telegram numeric ids — invented, never a real account.
+TG_ANA = "100000001"
+TG_BRUNO = "100000002"
+TG_CARLA = "100000003"
+TG_DANI = "100000004"
 
-async def test_telegram_ignores_mentions_and_logs(fake_httpx, caplog):
+
+def _tg_bodies(fake_httpx):
+    """Each ``sendMessage`` body, in send order."""
+    return [body_of(c) for c in fake_httpx.calls if "sendMessage" in c["url"]]
+
+
+def _tg():
+    return TelegramChannel(ChannelConfig(token="T"))
+
+
+async def test_telegram_mention_is_a_text_mention_entity_over_the_name(fake_httpx):
+    fake_httpx.routes = {"sendMessage": FakeResponse({"result": {"message_id": 7}})}
+    ch = _tg()
+    tok = ch.mention_token(TG_ANA, "José")        # the token IS the label on Telegram
+    await ch.send("42", OutboundMessage(text=f"Oi {tok}, pronto",
+                                        mentions=[Mention(TG_ANA, "José")]))
+    body = _tg_bodies(fake_httpx)[0]
+    assert body["text"] == "Oi José, pronto"      # the accented name is unchanged in the text
+    # "Oi " is 3 UTF-16 units; "José" is 4 (the accented é is one BMP unit). user.id is the int.
+    assert body["entities"] == [
+        {"type": "text_mention", "offset": 3, "length": 4, "user": {"id": 100000001}}]
+    assert "parse_mode" not in body               # entities are the only parse surface
+
+
+async def test_telegram_offset_counts_an_emoji_as_two_utf16_units(fake_httpx):
+    fake_httpx.routes = {"sendMessage": FakeResponse({"result": {"message_id": 7}})}
+    ch = _tg()
+    # A thumbs-up before the name: outside the BMP, it is a surrogate PAIR — 2 UTF-16 units — so the
+    # name that a code-point count would place at offset 2 actually starts at UTF-16 offset 3.
+    await ch.send("42", OutboundMessage(text="\U0001F44D Ana ok",
+                                        mentions=[Mention(TG_ANA, "Ana")]))
+    ent = _tg_bodies(fake_httpx)[0]["entities"][0]
+    assert ent["offset"] == 3                      # emoji (2) + space (1)
+    assert ent["length"] == 3                      # "Ana"
+    assert ent["user"] == {"id": 100000001}
+
+
+async def test_telegram_two_names_become_two_entities(fake_httpx):
+    fake_httpx.routes = {"sendMessage": FakeResponse({"result": {"message_id": 7}})}
+    ch = _tg()
+    ta, tb = ch.mention_token(TG_ANA, "Ana"), ch.mention_token(TG_BRUNO, "Bruno")
+    await ch.send("42", OutboundMessage(
+        text=f"{ta} e {tb}, confirmado",
+        mentions=[Mention(TG_ANA, "Ana"), Mention(TG_BRUNO, "Bruno")]))
+    body = _tg_bodies(fake_httpx)[0]
+    # "Ana" at 0 (len 3), " e " spans 3..6, "Bruno" at 6 (len 5).
+    assert body["entities"] == [
+        {"type": "text_mention", "offset": 0, "length": 3, "user": {"id": 100000001}},
+        {"type": "text_mention", "offset": 6, "length": 5, "user": {"id": 100000002}}]
+
+
+async def test_telegram_absent_token_yields_no_entity_and_warns_without_id(fake_httpx, caplog):
     fake_httpx.routes = {"sendMessage": FakeResponse({"result": {"message_id": 7}})}
     with caplog.at_level(logging.WARNING, logger="cogno_gateway"):
-        await TelegramChannel(ChannelConfig(token="T")).send(
-            "42", OutboundMessage(text="Ana done", mentions=[Mention(ANA, "Ana")]))
-    sent = body_of([c for c in fake_httpx.calls if "sendMessage" in c["url"]][0])
-    assert sent["text"] == "Ana done" and "mentioned" not in sent
-    msgs = [r.getMessage() for r in caplog.records if "mentions_unsupported" in r.getMessage()]
-    assert msgs == ["channel=telegram event=mentions_unsupported"]
-    assert all(ANA not in r.getMessage() for r in caplog.records)
+        # The host forgot to place Ana's name in the text → no entity, and a warning with no id.
+        await _tg().send("42", OutboundMessage(text="sem o nome aqui",
+                                               mentions=[Mention(TG_ANA, "Ana")]))
+    body = _tg_bodies(fake_httpx)[0]
+    assert body["text"] == "sem o nome aqui" and "entities" not in body
+    warnings = [r.getMessage() for r in caplog.records if "mention_token_absent" in r.getMessage()]
+    assert warnings == ["channel=telegram event=mention_token_absent"]
+    assert all("Ana" not in r.getMessage() and TG_ANA not in r.getMessage()
+               for r in caplog.records)
 
+
+async def test_telegram_more_than_max_mentions_raises_before_any_http(fake_httpx):
+    fake_httpx.routes = {"sendMessage": FakeResponse({"result": {"message_id": 7}})}
+    four = [Mention(TG_ANA, "Ana"), Mention(TG_BRUNO, "Bruno"),
+            Mention(TG_CARLA, "Carla"), Mention(TG_DANI, "Dani")]
+    assert len(four) == MAX_MENTIONS + 1
+    with pytest.raises(ValueError):
+        await _tg().send("42", OutboundMessage(text="Ana Bruno Carla Dani", mentions=four))
+    assert [c for c in fake_httpx.calls if "sendMessage" in c["url"]] == []  # nothing was sent
+
+
+async def test_telegram_no_mentions_sends_a_plain_body(fake_httpx):
+    fake_httpx.routes = {"sendMessage": FakeResponse({"result": {"message_id": 7}})}
+    await _tg().send("42", OutboundMessage(text="plain reply"))
+    body = _tg_bodies(fake_httpx)[0]
+    # Byte for byte the pre-0.1.18 shape: no "entities" key at all.
+    assert body["text"] == "plain reply" and "entities" not in body
+
+
+# ── the Cloud API and the web widget still ignore mentions and log ───────────
 
 async def test_cloud_ignores_mentions_and_logs(fake_httpx, caplog):
     fake_httpx.routes = {"messages": FakeResponse({"messages": [{"id": "wamid.X"}]})}
